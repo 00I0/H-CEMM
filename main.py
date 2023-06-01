@@ -1,3 +1,4 @@
+import numpy as np
 from matplotlib import pyplot as plt
 
 from diffusion_array import DiffusionArray
@@ -24,11 +25,13 @@ def main():
 
     print(darr.number_of_channels())
     print(darr[:].dtype)
-    plt.imshow(darr.frame(41).channel(0))
-    plt.show()
-
-    # plt.imshow(nd_file.asarray()[7, 0, :] - np.mean(nd_file.asarray()[:7, 0, :], axis=0))
+    # plt.imshow(darr.frame(41).channel(0))
     # plt.show()
+
+    darr = darr.channel(0)
+    print(np.mean(darr.frame('0:6'), axis=0).shape)
+    plt.imshow(darr.frame(20)[:] - np.mean(darr.frame('0:6'), axis=0))
+    plt.show()
 
 
 if __name__ == '__main__':

@@ -106,29 +106,35 @@ class DiffusionArray:
         """
         self._ndarray = new_data
 
-    def frame(self, frame: int) -> 'DiffusionArray':
+    def frame(self, frame: slice | int | str) -> 'DiffusionArray':
         """
         Extracts a single frame from the DiffusionArray object, using an index strategy
 
         Parameters:
-            frame (int): The index of the frame to extract.
+            frame: The index of the frame to extract.
 
         Returns:
             DiffusionArray: the same DiffusionArray object with the new index strategy
         """
+        if isinstance(frame, str):
+            frame = slice(*([int(x) for x in '1:4'.split(':')]))
+
         self.index_strategy = self.index_strategy.frame_extracted(frame)
         return self
 
-    def channel(self, channel: int) -> 'DiffusionArray':
+    def channel(self, channel: slice | int | str) -> 'DiffusionArray':
         """
         Extracts a single channel from the DiffusionArray object, using an index strategy
 
         Parameters:
-            channel (int): The index of the channel to extract.
+            channel: The index of the channel to extract.
 
         Returns:
             DiffusionArray:the same DiffusionArray object with the new index strategy.
         """
+        if isinstance(channel, str):
+            channel = slice(*([int(x) for x in '1:4'.split(':')]))
+
         self.index_strategy = self.index_strategy.channel_extracted(channel)
         return self
 
