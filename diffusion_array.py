@@ -132,6 +132,24 @@ class DiffusionArray:
         self.index_strategy = self.index_strategy.channel_extracted(channel)
         return self
 
+    def number_of_frames(self) -> int:
+        """
+        Returns the number of frames in the ndarray.
+
+        Returns:
+        - int: The number of frames.
+        """
+        return self.ndarray.shape[0]
+
+    def number_of_channels(self) -> int:
+        """
+        Returns the number of channels in the ndarray.
+
+        Returns:
+        - int: The number of channels.
+        """
+        return self.ndarray.shape[1]
+
 
 # index: frame, channel, x, y
 class _IndexStrategy(ABC):

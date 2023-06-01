@@ -21,8 +21,10 @@ def main():
 
     # print(darr.ndarray[0, :, :, :].shape())
     # print(darr.frame(0)[:].shape)
+
+    print(darr.number_of_channels())
     print(darr[:].dtype)
-    plt.imshow(darr.frame(0).channel(0))
+    plt.imshow(darr.frame(41).channel(0))
     plt.show()
 
     # plt.imshow(nd_file.asarray()[7, 0, :] - np.mean(nd_file.asarray()[:7, 0, :], axis=0))
