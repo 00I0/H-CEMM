@@ -25,8 +25,6 @@ frame_data = diff_array.frame(0)
 # Extract a single channel
 channel_data = diff_array.channel(1)
 
-# Plot the diffusion data
-diff_array.plot()
 ```
 
 #### Reader and Writer classes
