@@ -1,10 +1,13 @@
 from matplotlib import pyplot as plt
 
 from diffusion_array import DiffusionArray
-
-
 # it's just a playground... doesn't do anything related to the project
+from downloader import Downloader
+
+
 def main():
+    downloader = Downloader.from_json('1LOnjyZYbOBwZIqzFnwx3sJf9HM7J1A1R')
+    print(downloader.list_file_names())
     darr = DiffusionArray('a.nd2')
     # darr.save('super_1472_5_laser_EC1flow_laserabl010.npz')
 

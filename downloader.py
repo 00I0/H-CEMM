@@ -41,6 +41,15 @@ class Downloader:
         url = f"https://drive.google.com/uc?id={file_id}"
         gdown.download(url, file_name, quiet=False)
 
+    def list_file_names(self) -> list[str]:
+        """
+        Returns a list of file names available in the Downloader's configuration.
+
+        Returns:
+            list[str]: A list of file names.
+        """
+        return list(self.config.keys())
+
     @staticmethod
     def from_json(json_file_id: str) -> 'Downloader':
         """
@@ -57,4 +66,3 @@ class Downloader:
         with open("config.json", "r") as file:
             config = json.load(file)
             return Downloader(dict(config.items()))
-
