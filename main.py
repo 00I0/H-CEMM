@@ -7,9 +7,9 @@ from downloader import Downloader
 
 
 def main():
-    downloader = Downloader.from_json('1LOnjyZYbOBwZIqzFnwx3sJf9HM7J1A1R')
+    downloader = Downloader.from_json('1NEfEFK86jqWvNdPuLStjOi18dH9P1faN')
     print(downloader.list_file_names())
-    darr = DiffusionArray('a.nd2')
+    darr = DiffusionArray('1133_3%laser@30sec007.nd2')
     # darr.save('super_1472_5_laser_EC1flow_laserabl010.npz')
 
     # with nd2.ND2File('super_1472_5_laser_EC1flow_laserabl010.nd2') as nd_file:
@@ -30,7 +30,8 @@ def main():
 
     darr = darr.channel(0)
     print(np.mean(darr.frame('0:6'), axis=0).shape)
-    plt.imshow(darr.frame(20)[:] - np.mean(darr.frame('0:6'), axis=0))
+    plt.imshow(darr.frame(13)[:] - np.mean(darr.frame('0:6'), axis=0))
+    # plt.imshow(darr.frame(13))
     plt.show()
 
 

@@ -39,7 +39,9 @@ class DiffusionArray:
             self.ndarray = ndarray
 
         if self.ndarray.ndim != 4:
-            raise ValueError(f'ndarray must be 4 dimensional, but was: {ndarray.ndim}')
+            # assuming channel dimension is missing TODO: dimension generating strategy
+            self.ndarray = np.expand_dims(self.ndarray, axis=1)
+            print(self.ndarray.shape)
 
     def save(self, path: str):
         """
@@ -114,13 +116,14 @@ class DiffusionArray:
             frame: The index of the frame to extract.
 
         Returns:
-            DiffusionArray: the same DiffusionArray object with the new index strategy
+            DiffusionArray: a new DiffusionArray object with the new index strategy
         """
         if isinstance(frame, str):
             frame = slice(*([int(x) for x in '1:4'.split(':')]))
 
-        self.index_strategy = self.index_strategy.frame_extracted(frame)
-        return self
+        other = DiffusionArray(path=None, ndarray=self.ndarray)
+        other.index_strategy = self.index_strategy.frame_extracted(frame)
+        return other
 
     def channel(self, channel: slice | int | str) -> 'DiffusionArray':
         """
@@ -130,13 +133,14 @@ class DiffusionArray:
             channel: The index of the channel to extract.
 
         Returns:
-            DiffusionArray:the same DiffusionArray object with the new index strategy.
+            DiffusionArray: a new DiffusionArray object with the new index strategy.
         """
         if isinstance(channel, str):
             channel = slice(*([int(x) for x in '1:4'.split(':')]))
 
-        self.index_strategy = self.index_strategy.channel_extracted(channel)
-        return self
+        other = DiffusionArray(path=None, ndarray=self.ndarray)
+        other.index_strategy = self.index_strategy.channel_extracted(channel)
+        return other
 
     def number_of_frames(self) -> int:
         """
