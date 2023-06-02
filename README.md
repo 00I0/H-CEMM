@@ -5,7 +5,7 @@ This project focuses on analyzing diffusion data obtained from experiments on fi
 
 ### Installation
 
-To use this project, you need to have Python 3 installed on your system. You can install the required dependencies using pip:
+You can use this project form [this notebook](https://colab.research.google.com/drive/1hF2iO7PVChLhxLPhayTbrtgaHG04MJVo?usp=sharing)
 
 ### Usage
 
