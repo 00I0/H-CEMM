@@ -28,7 +28,7 @@ class DiffusionArray:
             both None
         """
 
-        self.index_strategy = _DefaultIndexStrategy()
+        self._index_strategy = _DefaultIndexStrategy()
 
         if path is None and ndarray is None:
             raise ValueError('path and ndarray were both none')
@@ -65,7 +65,7 @@ class DiffusionArray:
         Returns:
             iterator: An iterator over the diffusion ndarray.
         """
-        return self.index_strategy.iter(self.ndarray)
+        return self._index_strategy.iter(self.ndarray)
 
     def __getitem__(self, key: Any) -> Any:
         """
@@ -77,7 +77,7 @@ class DiffusionArray:
         Returns:
             np.array: The value(s) at the specified index or slice of the diffusion ndarray.
         """
-        return self.index_strategy.getitem(self.ndarray, key)
+        return self._index_strategy.getitem(self.ndarray, key)
 
     def __array__(self) -> np.ndarray:
         """
@@ -110,10 +110,11 @@ class DiffusionArray:
 
     def frame(self, frame: slice | int | str) -> 'DiffusionArray':
         """
-        Extracts a single frame from the DiffusionArray object, using an index strategy
+        Extracts frame(s) from the DiffusionArray object, using an index strategy
 
         Parameters:
-            frame: The index of the frame to extract.
+            frame: The index of the frame to extract. Can be an integer,
+                a slice, or a slice represented as a string (e.g., '1:4').
 
         Returns:
             DiffusionArray: a new DiffusionArray object with the new index strategy
@@ -122,15 +123,16 @@ class DiffusionArray:
             frame = slice(*([int(x) for x in '1:4'.split(':')]))
 
         other = DiffusionArray(path=None, ndarray=self.ndarray)
-        other.index_strategy = self.index_strategy.frame_extracted(frame)
+        other._index_strategy = self._index_strategy.frame_extracted(frame)
         return other
 
     def channel(self, channel: slice | int | str) -> 'DiffusionArray':
         """
-        Extracts a single channel from the DiffusionArray object, using an index strategy
+        Extracts  channel(s) from the DiffusionArray object, using an index strategy
 
         Parameters:
-            channel: The index of the channel to extract.
+            channel: The index of the frame to extract. Can be an integer,
+                a slice, or a slice represented as a string (e.g., '1:4').
 
         Returns:
             DiffusionArray: a new DiffusionArray object with the new index strategy.
@@ -139,7 +141,7 @@ class DiffusionArray:
             channel = slice(*([int(x) for x in '1:4'.split(':')]))
 
         other = DiffusionArray(path=None, ndarray=self.ndarray)
-        other.index_strategy = self.index_strategy.channel_extracted(channel)
+        other._index_strategy = self._index_strategy.channel_extracted(channel)
         return other
 
     def number_of_frames(self) -> int:
@@ -163,20 +165,64 @@ class DiffusionArray:
 
 # index: frame, channel, x, y
 class _IndexStrategy(ABC):
+    """
+    Base class for index strategies in the DiffusionArray class.
+
+    Subclasses of _IndexStrategy function as a finite state machine to handle frame and channel extraction.
+    They provide methods for modifying the index strategy and iterating over the data array.
+    """
+
     @abstractmethod
     def frame_extracted(self, frame) -> '_IndexStrategy':
+        """
+        Modifies the index strategy to extract frame(s) from the ndarray.
+
+        Parameters:
+            frame: The index of the frame to extract.
+
+        Returns:
+            _IndexStrategy: A new instance of the index strategy with the frame extraction applied.
+        """
         raise NotImplementedError("frame_extracted method must be implemented in a derived class.")
 
     @abstractmethod
     def channel_extracted(self, channel) -> '_IndexStrategy':
+        """
+        Modifies the index strategy to extract channel(s) from the ndarray.
+
+        Parameters:
+            channel: The index of the channel to extract.
+
+        Returns:
+            _IndexStrategy: A new instance of the index strategy with the channel extraction applied.
+        """
         raise NotImplementedError("channel_extracted method must be implemented in a derived class.")
 
     @abstractmethod
     def iter(self, ndarray: np.ndarray) -> Iterator:
+        """
+        Iterates over the data array based on the index strategy.
+
+        Parameters:
+            ndarray (np.ndarray): The data array to iterate over.
+
+        Returns:
+            Iterator: An iterator over the selected elements of the data array.
+        """
         raise NotImplementedError("iter method must be implemented in a derived class.")
 
     @abstractmethod
     def getitem(self, ndarray: np.ndarray, key: Any) -> Any:
+        """
+        Retrieves the selected elements from the data array based on the index strategy.
+
+        Parameters:
+            ndarray (np.ndarray): The data array to extract elements from.
+            key (Any): The key used to select elements from the array.
+
+        Returns:
+            Any: The selected elements from the data array.
+        """
         raise NotImplementedError("getitem method must be implemented in a derived class.")
 
 

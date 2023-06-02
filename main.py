@@ -1,15 +1,37 @@
+import os
+
 import numpy as np
 from matplotlib import pyplot as plt
 
 from diffusion_array import DiffusionArray
 # it's just a playground... doesn't do anything related to the project
-from downloader import Downloader
+from reader import ND2Reader
+
+
+def create_files_in_directory(directory: str):
+    for filename in os.listdir(directory):
+        if filename.endswith(".nd2"):
+            file_path = os.path.join(directory, filename)
+            npz_filename = os.path.splitext(filename)[0] + ".npz"
+            npz_filepath = os.path.join(directory, npz_filename)
+
+            meta_filename = os.path.splitext(filename)[0] + "_meta.txt"
+            meta_filepath = os.path.join(directory, meta_filename)
+
+            DiffusionArray(file_path).save(npz_filepath)
+            with open(meta_filepath, "w", encoding="utf-8") as meta_file:
+                meta = str(ND2Reader().meta(file_path))
+                meta_file.write(meta)
 
 
 def main():
-    downloader = Downloader.from_json('1NEfEFK86jqWvNdPuLStjOi18dH9P1faN')
-    print(downloader.list_file_names())
+    # downloader = Downloader.from_json('1NEfEFK86jqWvNdPuLStjOi18dH9P1faN')
+    # print(downloader.list_file_names())
     darr = DiffusionArray('1133_3%laser@30sec007.nd2')
+
+    directory = 'G:\\rost\\Ca2+_laser'
+    # create_files_in_directory(directory)
+
     # darr.save('super_1472_5_laser_EC1flow_laserabl010.npz')
 
     # with nd2.ND2File('super_1472_5_laser_EC1flow_laserabl010.nd2') as nd_file:
