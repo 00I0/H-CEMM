@@ -1,8 +1,5 @@
 import os
 
-import numpy as np
-from matplotlib import pyplot as plt
-
 from diffusion_array import DiffusionArray
 # it's just a playground... doesn't do anything related to the project
 from reader import ND2Reader
@@ -27,14 +24,14 @@ def create_files_in_directory(directory: str):
 def main():
     # downloader = Downloader.from_json('1NEfEFK86jqWvNdPuLStjOi18dH9P1faN')
     # print(downloader.list_file_names())
-    darr = DiffusionArray('1133_3%laser@30sec007.nd2')
+    darr = DiffusionArray('../data/1133_3%laser@30sec007.nd2')
 
     directory = 'G:\\rost\\Ca2+_laser'
     # create_files_in_directory(directory)
 
-    # darr.save('super_1472_5_laser_EC1flow_laserabl010.npz')
+    # darr.save('data/super_1472_5_laser_EC1flow_laserabl010.npz')
 
-    # with nd2.ND2File('super_1472_5_laser_EC1flow_laserabl010.nd2') as nd_file:
+    # with nd2.ND2File('data/super_1472_5_laser_EC1flow_laserabl010.nd2') as nd_file:
 
     # nd_file
     # print(nd_file.metadata)
@@ -45,16 +42,18 @@ def main():
     # print(darr.ndarray[0, :, :, :].shape())
     # print(darr.frame(0)[:].shape)
 
-    print(darr.number_of_channels())
-    print(darr[:].dtype)
-    # plt.imshow(darr.frame(41).channel(0))
+    # print(darr.number_of_channels())
+    # print(darr[:].dtype)
+    # # plt.imshow(darr.frame(41).channel(0))
+    # # plt.show()
+    #
+    # darr = darr.channel(0)
+    # print(np.mean(darr.frame('0:6'), axis=0).shape)
+    # plt.imshow(darr.frame(13)[:] - np.mean(darr.frame('0:6'), axis=0))
+    # # plt.imshow(darr.frame(13))
     # plt.show()
 
-    darr = darr.channel(0)
-    print(np.mean(darr.frame('0:6'), axis=0).shape)
-    plt.imshow(darr.frame(13)[:] - np.mean(darr.frame('0:6'), axis=0))
-    # plt.imshow(darr.frame(13))
-    plt.show()
+    print(darr.channel(0).frame('0:10').shape)
 
 
 if __name__ == '__main__':

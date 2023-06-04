@@ -41,7 +41,6 @@ class DiffusionArray:
         if self.ndarray.ndim != 4:
             # assuming channel dimension is missing TODO: dimension generating strategy
             self.ndarray = np.expand_dims(self.ndarray, axis=1)
-            print(self.ndarray.shape)
 
     def save(self, path: str):
         """
@@ -120,7 +119,7 @@ class DiffusionArray:
             DiffusionArray: a new DiffusionArray object with the new index strategy
         """
         if isinstance(frame, str):
-            frame = slice(*([int(x) for x in '1:4'.split(':')]))
+            frame = slice(*([int(x) for x in frame.split(':')]))
 
         other = DiffusionArray(path=None, ndarray=self.ndarray)
         other._index_strategy = self._index_strategy.frame_extracted(frame)
@@ -138,12 +137,13 @@ class DiffusionArray:
             DiffusionArray: a new DiffusionArray object with the new index strategy.
         """
         if isinstance(channel, str):
-            channel = slice(*([int(x) for x in '1:4'.split(':')]))
+            channel = slice(*([int(x) for x in channel.split(':')]))
 
         other = DiffusionArray(path=None, ndarray=self.ndarray)
         other._index_strategy = self._index_strategy.channel_extracted(channel)
         return other
 
+    @property
     def number_of_frames(self) -> int:
         """
         Returns the number of frames in the ndarray.
@@ -153,6 +153,7 @@ class DiffusionArray:
         """
         return self.ndarray.shape[0]
 
+    @property
     def number_of_channels(self) -> int:
         """
         Returns the number of channels in the ndarray.
@@ -161,6 +162,10 @@ class DiffusionArray:
         - int: The number of channels.
         """
         return self.ndarray.shape[1]
+
+    @property
+    def shape(self):
+        return self[:].shape
 
 
 # index: frame, channel, x, y
