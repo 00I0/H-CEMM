@@ -14,7 +14,7 @@ You can use this project form [this notebook](https://colab.research.google.com/
 The `DiffusionArray` class is a wrapper around a numpy array representing diffusion data. It provides methods for loading data from files, extracting frames or channels.
 
 ```python
-from diffusion import DiffusionArray
+from diffusion_array import DiffusionArray
 
 # Create a DiffusionArray object from a file
 diff_array = DiffusionArray('data.npy')
@@ -32,7 +32,8 @@ channel_data = diff_array.channel(1)
 The `Reader` class provides a way to instantiate the correct reader based on the file extension. Similarly, the `Writer` class allows you to instantiate the correct writer based on the file extension. This enables easy loading and saving of diffusion data in different formats.
 
 ```python
-from diffusion import Reader, Writer
+from reader import Reader
+from writer import Writer
 
 # Create a reader based on the file extension
 reader = Reader.of_type('data.nd2')
