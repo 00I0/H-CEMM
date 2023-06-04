@@ -1,6 +1,7 @@
 import os
 
 from diffusion_array import DiffusionArray
+from downloader import Downloader
 # it's just a playground... doesn't do anything related to the project
 from reader import ND2Reader
 
@@ -24,7 +25,11 @@ def create_files_in_directory(directory: str):
 def main():
     # downloader = Downloader.from_json('1NEfEFK86jqWvNdPuLStjOi18dH9P1faN')
     # print(downloader.list_file_names())
-    darr = DiffusionArray('../data/1133_3%laser@30sec007.nd2')
+    print(os.getcwd())
+    print(os.path.normpath('data/1133_3%laser@30sec007.nd2'))
+    darr = DiffusionArray('data/1133_3%laser@30sec007.nd2')
+
+    downloader = Downloader.from_json('1NEfEFK86jqWvNdPuLStjOi18dH9P1faN')
 
     directory = 'G:\\rost\\Ca2+_laser'
     # create_files_in_directory(directory)
