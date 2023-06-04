@@ -62,7 +62,7 @@ class Downloader:
             Downloader: The created Downloader object.
         """
         url = f"https://drive.google.com/uc?id={json_file_id}"
-        gdown.download(url, "data/config.json", quiet=False)
-        with open("data/config.json", "r") as file:
+        gdown.download(url, "config.json", quiet=False)
+        with open("config.json", "r") as file:
             config = json.load(file)
             return Downloader(dict(config.items()))
