@@ -38,6 +38,8 @@ class DiffusionArray:
         else:
             self.ndarray = ndarray
 
+        self.ndarray = self.ndarray.astype(np.int32)
+
         if self.ndarray.ndim != 4:
             # assuming channel dimension is missing TODO: dimension generating strategy
             self.ndarray = np.expand_dims(self.ndarray, axis=1)
@@ -164,8 +166,24 @@ class DiffusionArray:
         return self.ndarray.shape[1]
 
     @property
-    def shape(self):
+    def shape(self) -> tuple:
+        """
+        Returns the shape of the underlying ndarray with the proper index strategy applied
+
+        Returns:
+            tuple: A tuple representing the shape of the object.
+        """
         return self[:].shape
+
+    @property
+    def ndim(self) -> int:
+        """
+        Returns the number of dimensions of the underlying ndarray with the proper index strategy applied.
+
+        Returns:
+            int: The number of dimensions of the object.
+        """
+        return self[:].ndim
 
 
 # index: frame, channel, x, y
