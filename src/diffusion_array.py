@@ -3,24 +3,24 @@ from typing import Iterator, Any
 
 import numpy as np
 
-from reader import Reader
-from writer import Writer
+from src.file_meta import FileMeta
+from src.mask import Mask
+from src.reader import Reader
+from src.writer import Writer
 
 
 class DiffusionArray:
     """
-    Wrapper class for a numpy array representing the diffusion of ATP in fish.
-
-    Attributes:
-        ndarray (np.array): The numpy array representing the diffusion data.
+    Wrapper class for a numpy array representing the diffusion of ATP or Ca2+ in fish.
     """
 
-    def __init__(self, path: str | None, ndarray: np.ndarray | None = None):
+    def __init__(self, path: str | FileMeta | None, ndarray: np.ndarray | None = None):
         """
         Constructs a DiffusionArray object by loading data from a file.
 
         Parameters:
-            path (str): The path to the file containing the diffusion data.
+            path (str | FileMeta): The path to the file containing the diffusion data
+            (could also be wrapped in a FileMeta object).
             ndarray (np.ndarray): an array already containing the data, if given path will be ignored
 
         Raises:
@@ -34,15 +34,19 @@ class DiffusionArray:
             raise ValueError('path and ndarray were both none')
 
         if ndarray is None:
-            self.ndarray = Reader.of_type(path).read(path)
+            if isinstance(path, FileMeta):
+                self._meta = path
+                self._ndarray = Reader.of_type(path.name).read(path.name)
+            else:
+                self._ndarray = Reader.of_type(path).read(path)
         else:
-            self.ndarray = ndarray
+            self._ndarray = ndarray
 
-        self.ndarray = self.ndarray.astype(np.int32)
+        self._ndarray = self.ndarray.astype(np.int32)
 
         if self.ndarray.ndim != 4:
             # assuming channel dimension is missing TODO: dimension generating strategy
-            self.ndarray = np.expand_dims(self.ndarray, axis=1)
+            self._ndarray = np.expand_dims(self.ndarray, axis=1)
 
     def save(self, path: str):
         """
@@ -80,6 +84,17 @@ class DiffusionArray:
         """
         return self._index_strategy.getitem(self.ndarray, key)
 
+    def __setitem__(self, key: Any, value: int | float | np.ndarray):
+        """
+        Sets the value(s) at the specified index or slice of the diffusion ndarray, to the value provided
+
+        Parameters:
+            key: Index or slice object specifying the indices or range of indices to retrieve.
+            value: The new value of the items selected by the key
+
+        """
+        self._ndarray = self._index_strategy.setitem(self._ndarray, key, value)
+
     def __array__(self) -> np.ndarray:
         """
         Returns the underlying  ndarray, sliced by the index strategies.
@@ -98,16 +113,6 @@ class DiffusionArray:
             np.array: The diffusion data array.
         """
         return self._ndarray
-
-    @ndarray.setter
-    def ndarray(self, new_data: np.array):
-        """
-        Setter method for the data attribute.
-
-        Parameters:
-            new_data (np.array): The new diffusion data array.
-        """
-        self._ndarray = new_data
 
     def frame(self, frame: slice | int | str) -> 'DiffusionArray':
         """
@@ -175,6 +180,31 @@ class DiffusionArray:
         """
         return self[:].shape
 
+    def update_ndarray(self, ndarray: np.ndarray) -> 'DiffusionArray':
+        """
+        Updates the DiffusionArray with a new ndarray.
+
+        Parameters:
+            ndarray (np.ndarray): The new ndarray to update the DiffusionArray.
+
+        Returns:
+            DiffusionArray: A new DiffusionArray object with the updated ndarray.
+        """
+        darr = DiffusionArray(path=None, ndarray=ndarray)
+        darr._index_strategy = self._index_strategy
+        return darr
+
+    def copy(self) -> 'DiffusionArray':
+        """
+        Creates a copy of the DiffusionArray object.
+
+        Returns:
+            DiffusionArray: A new DiffusionArray object with the same ndarray and index strategy.
+        """
+        darr = DiffusionArray(path=None, ndarray=self.ndarray)
+        darr._index_strategy = self._index_strategy
+        return darr
+
     @property
     def ndim(self) -> int:
         """
@@ -184,6 +214,21 @@ class DiffusionArray:
             int: The number of dimensions of the object.
         """
         return self[:].ndim
+
+    @property
+    def meta(self) -> FileMeta:
+        """
+        Returns the FileMeta object associated with the DiffusionArray.
+
+        Returns:
+            FileMeta: The FileMeta object associated with the DiffusionArray.
+
+        Raises:
+            ValueError: If the FileMeta object was not provided.
+        """
+        if self._meta is None:
+            raise ValueError('File meta was not provided')
+        return self._meta
 
 
 # index: frame, channel, x, y
@@ -248,12 +293,29 @@ class _IndexStrategy(ABC):
         """
         raise NotImplementedError("getitem method must be implemented in a derived class.")
 
+    @abstractmethod
+    def setitem(self, ndarray: np.ndarray, key: Any, value: Any) -> np.ndarray:
+        """
+        Sets the selected elements in the data array based on the index strategy to the value provided
+
+        Parameters:
+            ndarray (np.ndarray): The data array to extract elements from.
+            key (Any): The key used to select elements from the array.
+            value (Any) The new value of the selected items
+
+        Returns:
+            the modified ndarray
+
+        """
+        raise NotImplementedError("getitem method must be implemented in a derived class.")
+
 
 class _DefaultIndexStrategy(_IndexStrategy):
     def iter(self, ndarray: np.ndarray) -> Iterator:
         return iter(ndarray)
 
     def getitem(self, ndarray: np.ndarray, key: Any) -> Any:
+        print(type(key))
         return ndarray[key]
 
     def frame_extracted(self, frame) -> '_IndexStrategy':
@@ -261,6 +323,13 @@ class _DefaultIndexStrategy(_IndexStrategy):
 
     def channel_extracted(self, channel) -> '_IndexStrategy':
         return _ChannelExtractedIndexStrategy(channel)
+
+    def setitem(self, ndarray, key, value) -> np.ndarray:
+        if isinstance(key, Mask):
+            raise ValueError('A channel must be selected first to apply a mask')
+        else:
+            ndarray[key] = value
+        return ndarray
 
 
 class _ChannelExtractedIndexStrategy(_IndexStrategy):
@@ -271,7 +340,29 @@ class _ChannelExtractedIndexStrategy(_IndexStrategy):
         return iter(ndarray[:, self.channel, :, :])
 
     def getitem(self, ndarray: np.ndarray, key: Any) -> Any:
-        return ndarray[:, self.channel, :, :][key]
+        if isinstance(key, Mask):
+            ans = []
+            for i in range(ndarray.shape[0]):
+                for_frame = key.for_frame(i)
+                ans.append(ndarray[i, self.channel, for_frame])
+            return np.array(ans)
+        else:
+            return ndarray[:, self.channel, :, :][key]
+
+    def setitem(self, ndarray: np.ndarray, key: Any, value: Any) -> np.ndarray:
+
+        if isinstance(key, Mask):
+            for i in range(ndarray.shape[0]):
+                for_frame = key.for_frame(i)
+                if isinstance(value, np.ndarray):
+                    ndarray[i, self.channel, for_frame] = value[i]
+                else:
+                    ndarray[i, self.channel, for_frame] = value
+
+        else:
+            ndarray[:, self.channel, :, :][key] = value
+
+        return ndarray
 
     def frame_extracted(self, frame) -> '_IndexStrategy':
         return _ChannelAndFrameExtractedIndexStrategy(self.channel, frame)
@@ -290,6 +381,13 @@ class _FrameExtractedIndexStrategy(_IndexStrategy):
     def getitem(self, ndarray: np.ndarray, key: Any) -> Any:
         return ndarray[self.frame, ...][key]
 
+    def setitem(self, ndarray: np.ndarray, key: Any, value: Any) -> np.ndarray:
+        if isinstance(key, Mask):
+            raise ValueError('A channel must be selected first to apply a mask')
+        else:
+            ndarray[self.frame, ...][key] = value
+        return ndarray
+
     def frame_extracted(self, frame) -> '_IndexStrategy':
         return _FrameExtractedIndexStrategy(frame)
 
@@ -307,6 +405,21 @@ class _ChannelAndFrameExtractedIndexStrategy(_IndexStrategy):
 
     def getitem(self, ndarray: np.ndarray, key: Any) -> Any:
         return ndarray[self.frame, self.channel, :, :][key]
+
+    def setitem(self, ndarray: np.ndarray, key: Any, value: Any) -> np.ndarray:
+        if isinstance(key, Mask):
+            for_frame = key.for_frame(self.frame)
+            if isinstance(value, np.ndarray):
+                ndarray[self.frame, self.channel, for_frame] = value[self.frame]
+            else:
+                ndarray[self.frame, self.channel, for_frame] = value
+        else:
+            if isinstance(value, np.ndarray):
+                ndarray[self.frame, self.channel, ...] = value[self.frame]
+            else:
+                ndarray[self.frame, self.channel, ...] = value
+
+        return ndarray
 
     def frame_extracted(self, frame) -> '_IndexStrategy':
         return _ChannelAndFrameExtractedIndexStrategy(self.channel, frame)

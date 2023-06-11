@@ -8,6 +8,7 @@ from analyzer import Analyzer
 from diffusion_array import DiffusionArray
 # it's just a playground... doesn't do anything related to the project
 from reader import ND2Reader
+from src.mask import Mask
 
 
 # directory = 'G:\\rost\\Ca2+_laser'
@@ -27,14 +28,16 @@ def create_files_in_directory(directory: str):
                 meta_file.write(meta)
 
 
-def plot_start_neighbourhood(darr: DiffusionArray):
+def plot_start_neighbourhood(darr: DiffusionArray, start_frame=None, start_place=None):
     analyzer = Analyzer(darr.channel(0))
-    place = analyzer.detect_diffusion_start_place()
-    start_frame = analyzer.detect_diffusion_start_frame()
+    if start_frame is None:
+        start_frame = analyzer.detect_diffusion_start_frame()
+    if start_place is None:
+        start_place = analyzer.detect_diffusion_start_place()
 
-    fig, axes = plt.subplots(1, 3, figsize=(10, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(20, 8))
     axes[1].imshow(darr.channel(0).frame(start_frame))
-    axes[1].scatter(place[1], place[0], color='red')
+    axes[1].scatter(start_place[1], start_place[0], color='red')
     axes[1].tick_params(label1On=False, tick1On=False)
     axes[1].set_title('detected start')
 
@@ -59,14 +62,14 @@ def plot_exp_fit(darr):
     y = maxes[np.argmax(maxes):]
     x = np.arange(len(y)) + np.argmax(maxes)
     params = model.make_params(a=2.0, b=0.3)
+    params['a'].min = 0
+    params['b'].min = 0
     result = model.fit(y, params, x=x)
-
-    # print(result.fit_report()['R-squared'])
 
     r_squared_text = f'R-squared: {result.rsquared:.4f}\n a: {result.best_values["a"]:.2f}, b: {result.best_values["b"]:.2f}'
     plt.plot(maxes, 'bo', label='Data')
     plt.plot(x, result.best_fit, 'r-', label='Best Fit')
-    plt.axvline(x=start_frame, label='Start Frame')
+    plt.axvline(x=start_frame, label='Start Frame', color='green')
     plt.legend(title=r_squared_text)
     plt.show()
 
@@ -74,53 +77,76 @@ def plot_exp_fit(darr):
 def main():
     # downloader = Downloader.from_json('1NEfEFK86jqWvNdPuLStjOi18dH9P1faN')
     # print(downloader.list_file_names())
+    # downloader.download_file('super_1472_5%laser_EC1flow_laserabl017.nd2')
+    # meta = downloader.file_meta_for('super_1472_5%laser_EC1flow_laserabl017.nd2')
+    # darr = DiffusionArray(meta)
     # Sum of intensities by frames
 
-    # darr = DiffusionArray('G:\\rost\\Ca2+_laser\\1133_3_laser@30sec008.nd2')
-    # super_1472_5_laser_EC1flow_laserabl010.nd2
-    darr = DiffusionArray('G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl017.nd2')
-    # 1472_4_laser@30sec001.nd2
-    # darr = DiffusionArray('G:\\rost\\sarok\\1472_4_laser@30sec003.nd2')
+    filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec006.nd2'
+    # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl017.nd2'
+    # filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'
+    darr = DiffusionArray(filename)
+    # best for homo: 008 & 006   |   018 & 017    |    003 & 004
 
-    # darrs = []
-    # directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
-    # directories = ['G:\\rost\\Ca2+_laser']
-    # for directory in directories:
-    #     for filename in os.listdir(directory):
-    #         if filename.endswith(".nd2"):
-    #             print(filename)
-    #             file_path = os.path.join(directory, filename)
-    #             darr = DiffusionArray(file_path)
-    #             analyzer = Analyzer(darr.channel(0))
-    #             start_frame = analyzer.detect_diffusion_start_frame()
-    #             maxes = analyzer.apply_for_each_frame(np.sum, remove_background=True, normalize=True)
-    #             plt.plot(maxes[start_frame:])
-    #
-    # plot_start_neighbourhood(darr)
+    darr = darr.channel(0)
 
-    analyzer = Analyzer(darr.channel(0))
+    # darr = darr.update_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
+
+    analyzer = Analyzer(darr)
     start_place = analyzer.detect_diffusion_start_place()
     start_frame = analyzer.detect_diffusion_start_frame()
-    maxes = analyzer.apply_for_each_frame(np.max, remove_background=True, normalize=True)
 
-    # print(result.fit_report()['R-squared'])
+    plt.show()
+    quarter_mask = Mask.bottom_right_quarter(darr.shape, start_place)
+    darr[quarter_mask] = 4444
+    plt.scatter(start_place[1], start_place[0], color='red')
+    plt.imshow(darr.frame(start_frame))
 
-    def biggest_jump(x, **kwargs):
-        sorted_array = np.sort(x, **kwargs)
-        max_jump_idx = np.argmax(np.diff(sorted_array, **kwargs), **kwargs)
-        return sorted_array[np.arange(sorted_array.shape[0]), max_jump_idx]
+    # plt.title('asd')
+    # copy = darr.copy()
+    # for i in range(0, 300, 2):
+    #     if i % 50 == 0:
+    #         print(i)
+    #     ring_mask = Mask.ring_mask(darr.shape, start_place, i, i + 2)
+    #     avg = analyzer.apply_for_each_frame(np.average, mask=ring_mask)
+    #     copy[ring_mask] = avg
+    #
+    # plot_start_neighbourhood(copy, start_frame=start_frame, start_place=start_place)
+    # plot_start_neighbourhood(darr, start_frame=start_frame, start_place=start_place)
+    #
+    fig, axs = plt.subplots(1, 2)
 
-    circle_mask = analyzer.circle_mask(start_place, 200)
-    cut_ofs = analyzer.apply_for_each_frame(np.mean, mask=circle_mask)
-    cell_mask = analyzer.cell_mask(circle_mask, cut_ofs)
-    arr = np.array(darr.channel(0))
+    maxes = analyzer.apply_for_each_frame(np.max)
+    sums = analyzer.apply_for_each_frame(np.sum)
+    axs[0].plot(maxes[start_frame:])
+    axs[1].plot(sums[start_frame:])
 
-    fig, ax = plt.subplots()
-
-    ax.imshow(arr[start_frame + 4])
-    ax.imshow(cell_mask[start_frame + 4], cmap='jet', alpha=0.3)
+    axs[0].set_title('Max by frame')
+    axs[1].set_title('Sum by frame')
+    plt.title(filename)
     plt.show()
 
 
 if __name__ == '__main__':
     main()
+
+# analyzer = Analyzer(data.channel(0))
+# start_place = analyzer.detect_diffusion_start_place()
+# start_frame = analyzer.detect_diffusion_start_frame()
+#
+#
+# def biggest_jump(x, **kwargs):
+#   sorted_array = np.sort(x, **kwargs)
+#   max_jump_idx = np.argmax(np.diff(sorted_array, **kwargs), **kwargs)
+#   return sorted_array[np.arange(sorted_array.shape[0]), max_jump_idx]
+#
+# circle_mask = analyzer.circle_mask(start_place, 300)
+# cut_ofs = analyzer.apply_for_each_frame(np.mean, mask=circle_mask)
+# cell_mask = analyzer.cell_mask(circle_mask, cut_ofs)
+# arr = np.array(data.channel(0))
+#
+# fig, ax = plt.subplots(figsize=(10, 8))
+#
+# ax.imshow(arr[start_frame + 4])
+# ax.imshow(cell_mask[start_frame + 4], cmap='jet', alpha=.3)
+# plt.show()
