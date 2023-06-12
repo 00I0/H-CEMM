@@ -60,7 +60,7 @@ class Downloader:
 
         file_id = self.config[file_name]['drive-id']
         folder = self.config[file_name]['folder']
-        homogenized_id = self.config[file_name]['homogenized_id']
+        homogenized_id = self.config[file_name]['homogenized-id']
 
         return FileMeta(file_name, file_id, folder, homogenized_id)
 
