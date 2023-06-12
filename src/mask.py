@@ -127,3 +127,37 @@ class Mask:
         ndarray[x:, y:] = True
 
         return Mask(ndarray)
+
+    @staticmethod
+    def cell(diffusion_array: np.ndarray, center: tuple, radius: int | float,
+             cutoff_by_frame: np.ndarray) -> 'Mask':
+        """
+        Generates a mask based on a circular mask and cutoff values for each frame. The mask tries to find the cells in
+        the given circular mask, in order to do so it uses a different cutoff value for each frame
+        Args:
+            diffusion_array (np.ndarray): the DiffusionArray as a np.ndarray
+            radius (int | float): The radius, giving bounds to the mask
+            center (tuple): The center around which cells should be detected
+            cutoff_by_frame (np.ndarray): The cutoff values for each frame.
+        Returns:
+            np.ndarray: The cell mask as a boolean array.
+        """
+        if diffusion_array.ndim != 3:
+            raise ValueError(f'diffusion_array must be 3D, but was: {diffusion_array.ndim}')
+
+        if cutoff_by_frame.ndim != 1:
+            raise ValueError(f'cutoff_by_frame must be 1D, but was: {cutoff_by_frame.ndim}')
+
+        if diffusion_array.shape[0] != len(cutoff_by_frame):
+            raise ValueError(f'diffusion_array and cutoff_by_frame have the same number of frames')
+
+        mask_cir = np.zeros(shape=diffusion_array.shape)
+        circle_mask = Mask.circle(diffusion_array.shape, center, radius).ndarray
+        print(mask_cir.shape, circle_mask.shape)
+        mask_cir[:, circle_mask] = 1
+
+        mask_cut = np.zeros(shape=diffusion_array.shape)
+        mask_cut[diffusion_array >= cutoff_by_frame[:, np.newaxis, np.newaxis]] = 1
+
+        mask = mask_cut * mask_cir
+        return Mask(mask.astype(bool))

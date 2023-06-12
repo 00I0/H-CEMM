@@ -108,7 +108,7 @@ def main():
     # darr = DiffusionArray(meta)
     # Sum of intensities by frames
 
-    filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec006_homogenized_avg.npz'
+    filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec006.nd2'
     # generate_homogenized_npz(directory='G:\\rost\\sarok')
     # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl017.nd2'
     # filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'
@@ -117,11 +117,11 @@ def main():
 
     darr = darr.channel(0)
 
-    plt.imshow(darr.frame(14))
-    plt.show()
+    # plt.imshow(darr.frame(14))
+    # plt.show()
 
     # darr = darr.update_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
-
+    r = 300
     analyzer = Analyzer(darr)
     start_place = analyzer.detect_diffusion_start_place()
     start_frame = analyzer.detect_diffusion_start_frame()
@@ -130,8 +130,14 @@ def main():
     # darr[quarter_mask] = 4444
     # plt.scatter(start_place[1], start_place[0], color='red')
     # plt.imshow(darr.frame(start_frame))
+    circle_mask = Mask.circle(darr.shape, start_place, r)
+    cell_mask = Mask.cell(darr[:], start_place, r, analyzer.apply_for_each_frame(np.mean, mask=circle_mask))
 
-    plt.title('asd')
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    ax.imshow(darr.frame(start_frame + 4))
+    ax.imshow(cell_mask.for_frame(start_frame + 4), cmap='jet', alpha=.3)
+    plt.show()
 
     # import cupy as np
     # copy = darr.copy()
@@ -145,17 +151,17 @@ def main():
     # plot_start_neighbourhood(copy, start_frame=start_frame, start_place=start_place)
     # plot_start_neighbourhood(darr, start_frame=start_frame, start_place=start_place)
     #
-    fig, axs = plt.subplots(1, 2)
-
-    maxes = analyzer.apply_for_each_frame(np.max)
-    sums = analyzer.apply_for_each_frame(np.sum)
-    axs[0].plot(maxes[start_frame:])
-    axs[1].plot(sums[start_frame:])
-
-    axs[0].set_title('Max by frame')
-    axs[1].set_title('Sum by frame')
-    plt.title(filename)
-    plt.show()
+    # fig, axs = plt.subplots(1, 2)
+    #
+    # maxes = analyzer.apply_for_each_frame(np.max)
+    # sums = analyzer.apply_for_each_frame(np.sum)
+    # axs[0].plot(maxes[start_frame:])
+    # axs[1].plot(sums[start_frame:])
+    #
+    # axs[0].set_title('Max by frame')
+    # axs[1].set_title('Sum by frame')
+    # plt.title(filename)
+    # plt.show()
 
 
 if __name__ == '__main__':
