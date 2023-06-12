@@ -28,6 +28,32 @@ def create_files_in_directory(directory: str):
                 meta_file.write(meta)
 
 
+def generate_homogenized_npz(directory: str, diff=2):
+    for filename in os.listdir(directory):
+        if filename.endswith(".nd2"):
+            file_path = os.path.join(directory, filename)
+            npz_filename = os.path.splitext(filename)[0] + "_homogenized_avg.npz"
+            npz_filepath = os.path.join(directory, npz_filename)
+
+            darr = DiffusionArray(file_path).channel(0)
+            darr = darr.update_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
+            analyzer = Analyzer(darr)
+            start_place = analyzer.detect_diffusion_start_place()
+            copy = darr.copy()
+
+            size = darr.channel(0).frame(0).shape[0]  # assuming square
+            max_distance = max(start_place[0], start_place[1], size - start_place[0], size - start_place[1])
+            max_distance = int((max_distance + 5) * 2 ** (1 / 2))
+            for i in range(0, max_distance, diff):
+                if i % 100 == 0:
+                    print(f'{filename:40s}--{i:4d}/{max_distance}')
+                ring_mask = Mask.ring(darr.shape, start_place, i, i + diff)
+                avg = analyzer.apply_for_each_frame(np.average, mask=ring_mask)
+                copy[ring_mask] = avg
+
+            copy.save(npz_filepath)
+
+
 def plot_start_neighbourhood(darr: DiffusionArray, start_frame=None, start_place=None):
     analyzer = Analyzer(darr.channel(0))
     if start_frame is None:
@@ -82,7 +108,8 @@ def main():
     # darr = DiffusionArray(meta)
     # Sum of intensities by frames
 
-    filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec006.nd2'
+    filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec006_homogenized_avg.npz'
+    # generate_homogenized_npz(directory='G:\\rost\\sarok')
     # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl017.nd2'
     # filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'
     darr = DiffusionArray(filename)
@@ -90,27 +117,31 @@ def main():
 
     darr = darr.channel(0)
 
+    plt.imshow(darr.frame(14))
+    plt.show()
+
     # darr = darr.update_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
 
     analyzer = Analyzer(darr)
     start_place = analyzer.detect_diffusion_start_place()
     start_frame = analyzer.detect_diffusion_start_frame()
+    # plt.show()
+    # quarter_mask = Mask.bottom_right_quarter(darr.shape, start_place)
+    # darr[quarter_mask] = 4444
+    # plt.scatter(start_place[1], start_place[0], color='red')
+    # plt.imshow(darr.frame(start_frame))
 
-    plt.show()
-    quarter_mask = Mask.bottom_right_quarter(darr.shape, start_place)
-    darr[quarter_mask] = 4444
-    plt.scatter(start_place[1], start_place[0], color='red')
-    plt.imshow(darr.frame(start_frame))
+    plt.title('asd')
 
-    # plt.title('asd')
+    # import cupy as np
     # copy = darr.copy()
     # for i in range(0, 300, 2):
     #     if i % 50 == 0:
     #         print(i)
-    #     ring_mask = Mask.ring_mask(darr.shape, start_place, i, i + 2)
+    #     ring_mask = Mask.ring(darr.shape, start_place, i, i + 2)
     #     avg = analyzer.apply_for_each_frame(np.average, mask=ring_mask)
     #     copy[ring_mask] = avg
-    #
+
     # plot_start_neighbourhood(copy, start_frame=start_frame, start_place=start_place)
     # plot_start_neighbourhood(darr, start_frame=start_frame, start_place=start_place)
     #
