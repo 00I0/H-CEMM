@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 from lmfit import Model
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, gridspec
 
 from analyzer import Analyzer
 from diffusion_array import DiffusionArray
@@ -54,7 +54,7 @@ def generate_homogenized_npz(directory: str, diff=2):
             copy.save(npz_filepath)
 
 
-def plot_start_neighbourhood(darr: DiffusionArray, start_frame=None, start_place=None):
+def plot_start_neighbourhood(darr: DiffusionArray, start_frame=None, start_place=None, super_title=None):
     analyzer = Analyzer(darr.channel(0))
     if start_frame is None:
         start_frame = analyzer.detect_diffusion_start_frame()
@@ -62,19 +62,34 @@ def plot_start_neighbourhood(darr: DiffusionArray, start_frame=None, start_place
         start_place = analyzer.detect_diffusion_start_place()
 
     fig, axes = plt.subplots(1, 3, figsize=(20, 8))
-    axes[1].imshow(darr.channel(0).frame(start_frame))
-    axes[1].scatter(start_place[1], start_place[0], color='red')
+
+    vmax = max(darr.frame(start_frame - 1)[:].max(),
+               darr.frame(start_frame)[:].max(),
+               darr.frame(start_frame + 1)[:].max()
+               )
+
+    vmin = min(darr.frame(start_frame - 1)[:].min(),
+               darr.frame(start_frame)[:].min(),
+               darr.frame(start_frame + 1)[:].min()
+               )
+
+    axes[1].imshow(darr.channel(0).frame(start_frame), vmax=vmax, vmin=vmin)
+    axes[1].scatter(start_place[1], start_place[0], color='red', alpha=.5)
     axes[1].tick_params(label1On=False, tick1On=False)
     axes[1].set_title('detected start')
 
-    axes[0].imshow(darr.channel(0).frame(start_frame - 1))
+    axes[0].imshow(darr.channel(0).frame(start_frame - 1), vmax=vmax, vmin=vmin)
     axes[0].tick_params(label1On=False, tick1On=False)
     axes[0].set_title('start - 1')
-    axes[2].imshow(darr.channel(0).frame(start_frame + 1))
+    axes[2].imshow(darr.channel(0).frame(start_frame + 1), vmax=vmax, vmin=vmin)
     axes[2].tick_params(label1On=False, tick1On=False)
     axes[2].set_title('start + 1')
-    # plt.subplots_adjust(wspace=0.4)
-    plt.show()
+    axes[2].scatter(start_place[1], start_place[0], color='red', alpha=.5)
+    plt.subplots_adjust(wspace=0.02, left=0.05, right=0.95, top=0.95, bottom=0.05)
+
+    if super_title is not None:
+        fig.suptitle(super_title)
+    # plt.show()
 
 
 def plot_exp_fit(darr):
@@ -101,35 +116,74 @@ def plot_exp_fit(darr):
 
 
 def main():
-    # downloader = Downloader.from_json('1NEfEFK86jqWvNdPuLStjOi18dH9P1faN')
-    # print(downloader.list_file_names())
-    # downloader.download_file('super_1472_5%laser_EC1flow_laserabl017.nd2')
-    # meta = downloader.file_meta_for('super_1472_5%laser_EC1flow_laserabl017.nd2')
-    # darr = DiffusionArray(meta)
-    # Sum of intensities by frames
-
     filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec006.nd2'
-    # generate_homogenized_npz(directory='G:\\rost\\sarok')
     # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl017.nd2'
     # filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'
-    darr = DiffusionArray(filename)
-    # best for homo: 008 & 006   |   018 & 017    |    003 & 004
-
-    darr = darr.channel(0)
-
-    # plt.imshow(darr.frame(14))
+    # darr = DiffusionArray(filename)
+    # darr = darr.channel(0)
+    #
+    # star_mask = Mask.star(darr.channel(0).frame(0)[:])
+    # fig, ax = plt.subplots(figsize=(10, 8))
+    #
+    # ax.imshow(darr.channel(0).frame(0))
+    # ax.imshow(star_mask.for_frame(0), cmap='jet', alpha=.3)
     # plt.show()
 
-    # darr = darr.update_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
+    directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
+    fig = plt.figure(figsize=(40, 36))
+    gs = gridspec.GridSpec(5, 7, width_ratios=[1, 1, 1, 0.05, 1, 1, 1])
+    i = 0
+    for directory in directories:
+        for filename in os.listdir(directory):
+            if filename.endswith(".nd2"):
+                print('processing: ', filename)
+                file_path = os.path.join(directory, filename)
+                darr = DiffusionArray(file_path).channel(0)
+
+                analyzer = Analyzer(darr.channel(0))
+                start_frame = analyzer.detect_diffusion_start_frame()
+                start_place = analyzer.detect_diffusion_start_place()
+
+                vmax = max(darr.frame(start_frame - 1)[:].max(),
+                           darr.frame(start_frame)[:].max(),
+                           darr.frame(start_frame + 1)[:].max()
+                           )
+
+                vmin = min(darr.frame(start_frame - 1)[:].min(),
+                           darr.frame(start_frame)[:].min(),
+                           darr.frame(start_frame + 1)[:].min()
+                           )
+
+                # ax = axes.flat[i // 2]
+                ax1 = plt.subplot(gs[i // 2, (i % 2) * 4 + 1])
+                ax1.imshow(darr.channel(0).frame(start_frame), vmax=vmax, vmin=vmin)
+                ax1.scatter(start_place[1], start_place[0], color='red', alpha=.5)
+                ax1.tick_params(label1On=False, tick1On=False)
+                ax1.set_title('detected start')
+                ax1.set_title(filename)
+
+                ax2 = plt.subplot(gs[i // 2, (i % 2) * 4 + 0])
+                ax2.imshow(darr.channel(0).frame(start_frame - 1), vmax=vmax, vmin=vmin)
+                ax2.tick_params(label1On=False, tick1On=False)
+                ax2.set_title('start - 1')
+
+                ax3 = plt.subplot(gs[i // 2, (i % 2) * 4 + 2])
+                ax3.imshow(darr.channel(0).frame(start_frame + 1), vmax=vmax, vmin=vmin)
+                ax3.tick_params(label1On=False, tick1On=False)
+                ax3.set_title('start + 1')
+                ax3.scatter(start_place[1], start_place[0], color='red', alpha=.5)
+
+                i = i + 1
+
+    fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.96, bottom=0.01)
+    title = 'f-avg(-1,1) r=d3'
+    fig.suptitle(title)
+    plt.savefig(f'{title}.pdf')
+    plt.show()
     r = 300
     analyzer = Analyzer(darr)
     start_place = analyzer.detect_diffusion_start_place()
     start_frame = analyzer.detect_diffusion_start_frame()
-    # plt.show()
-    # quarter_mask = Mask.bottom_right_quarter(darr.shape, start_place)
-    # darr[quarter_mask] = 4444
-    # plt.scatter(start_place[1], start_place[0], color='red')
-    # plt.imshow(darr.frame(start_frame))
     circle_mask = Mask.circle(darr.shape, start_place, r)
     cell_mask = Mask.cell(darr[:], start_place, r, analyzer.apply_for_each_frame(np.mean, mask=circle_mask))
 
@@ -139,51 +193,8 @@ def main():
     ax.imshow(cell_mask.for_frame(start_frame + 4), cmap='jet', alpha=.3)
     plt.show()
 
-    # import cupy as np
-    # copy = darr.copy()
-    # for i in range(0, 300, 2):
-    #     if i % 50 == 0:
-    #         print(i)
-    #     ring_mask = Mask.ring(darr.shape, start_place, i, i + 2)
-    #     avg = analyzer.apply_for_each_frame(np.average, mask=ring_mask)
-    #     copy[ring_mask] = avg
-
-    # plot_start_neighbourhood(copy, start_frame=start_frame, start_place=start_place)
-    # plot_start_neighbourhood(darr, start_frame=start_frame, start_place=start_place)
-    #
-    # fig, axs = plt.subplots(1, 2)
-    #
-    # maxes = analyzer.apply_for_each_frame(np.max)
-    # sums = analyzer.apply_for_each_frame(np.sum)
-    # axs[0].plot(maxes[start_frame:])
-    # axs[1].plot(sums[start_frame:])
-    #
-    # axs[0].set_title('Max by frame')
-    # axs[1].set_title('Sum by frame')
-    # plt.title(filename)
-    # plt.show()
+    # plot_start_neighbourhood(darr, super_title='1133_3_laser@30sec006')
 
 
 if __name__ == '__main__':
     main()
-
-# analyzer = Analyzer(data.channel(0))
-# start_place = analyzer.detect_diffusion_start_place()
-# start_frame = analyzer.detect_diffusion_start_frame()
-#
-#
-# def biggest_jump(x, **kwargs):
-#   sorted_array = np.sort(x, **kwargs)
-#   max_jump_idx = np.argmax(np.diff(sorted_array, **kwargs), **kwargs)
-#   return sorted_array[np.arange(sorted_array.shape[0]), max_jump_idx]
-#
-# circle_mask = analyzer.circle_mask(start_place, 300)
-# cut_ofs = analyzer.apply_for_each_frame(np.mean, mask=circle_mask)
-# cell_mask = analyzer.cell_mask(circle_mask, cut_ofs)
-# arr = np.array(data.channel(0))
-#
-# fig, ax = plt.subplots(figsize=(10, 8))
-#
-# ax.imshow(arr[start_frame + 4])
-# ax.imshow(cell_mask[start_frame + 4], cmap='jet', alpha=.3)
-# plt.show()

@@ -161,3 +161,28 @@ class Mask:
 
         mask = mask_cut * mask_cir
         return Mask(mask.astype(bool))
+
+    @staticmethod
+    def star(diffusion_array: np.ndarray, cutoff_extractor: callable = lambda x: np.percentile(x, 95)) -> 'Mask':
+        """
+        Create a mask by thresholding a diffusion array based on a cutoff value. It's useful for identifying the bright
+        values at the start of the diffusion process.
+
+        The diffusion_array must be a 2D NumPy array. The method calculates a cutoff value using the provided
+        cutoff_extractor function (default: np.percentile(diffusion_array, 95)), and creates a binary mask by setting
+        elements of diffusion_array above the cutoff value to 1 and the rest to 0.
+
+        Parameters:
+            diffusion_array (np.ndarray): The 2D array representing the diffusion data.
+            cutoff_extractor (callable): A function to extract the cutoff value from the diffusion array
+                (default: np.percentile(diffusion_array, 95)).
+
+        Returns:
+            Mask: A Mask object representing the binary mask.
+        """
+        if diffusion_array.ndim != 2:
+            raise ValueError(f'diffusion_array must be 2D, but was: {diffusion_array.ndim}')
+
+        mask = np.zeros(shape=diffusion_array.shape)
+        mask[diffusion_array > cutoff_extractor(diffusion_array)] = 1
+        return Mask(mask.astype(bool))

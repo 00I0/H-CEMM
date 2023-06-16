@@ -44,6 +44,8 @@ class DiffusionArray:
 
         self._ndarray = self.ndarray.astype(np.int32)
 
+        self._cached = {}
+
         if self.ndarray.ndim != 4:
             # assuming channel dimension is missing TODO: dimension generating strategy
             self._ndarray = np.expand_dims(self.ndarray, axis=1)
@@ -130,6 +132,9 @@ class DiffusionArray:
 
         other = DiffusionArray(path=None, ndarray=self.ndarray)
         other._index_strategy = self._index_strategy.frame_extracted(frame)
+        other._cached = self._cached
+        if hasattr(self, '_meta'):
+            other._meta = self.meta
         return other
 
     def channel(self, channel: slice | int | str) -> 'DiffusionArray':
@@ -148,6 +153,9 @@ class DiffusionArray:
 
         other = DiffusionArray(path=None, ndarray=self.ndarray)
         other._index_strategy = self._index_strategy.channel_extracted(channel)
+        other._cached = self._cached
+        if hasattr(self, '_meta'):
+            other._meta = self.meta
         return other
 
     @property
@@ -192,6 +200,8 @@ class DiffusionArray:
         """
         darr = DiffusionArray(path=None, ndarray=ndarray)
         darr._index_strategy = self._index_strategy
+        if hasattr(self, '_meta'):
+            darr._meta = self.meta
         return darr
 
     def copy(self) -> 'DiffusionArray':
@@ -203,6 +213,9 @@ class DiffusionArray:
         """
         darr = DiffusionArray(path=None, ndarray=self.ndarray)
         darr._index_strategy = self._index_strategy
+        darr._cached = self._cached.copy()
+        if hasattr(self, '_meta'):
+            darr._meta = self.meta
         return darr
 
     @property
@@ -229,6 +242,34 @@ class DiffusionArray:
         if self._meta is None:
             raise ValueError('File meta was not provided')
         return self._meta
+
+    def cache(self, **kwargs):
+        """
+        Cache the provided key-value pairs in the object's cache. Cache is persistent between DiffusionArrays created
+        by frame() or channel(). It is  not persistent between DiffusionArrays created by copy() or updtate_array()
+
+        Parameters:
+            **kwargs (key-value pairs): Key-value pairs to be cached.
+
+        Returns:
+            None
+        """
+        self._cached.update(kwargs)
+
+    def get_cached(self, key) -> Any:
+        """
+        Retrieve the cached value associated with the specified key.
+
+        Parameters:
+            key: The key for which the cached value is desired.
+
+        Returns:
+            The cached value corresponding to the key, or None if the key is not found.
+        """
+        try:
+            return self._cached[key]
+        except KeyError:
+            return None
 
 
 # index: frame, channel, x, y

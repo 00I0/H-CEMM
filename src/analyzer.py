@@ -23,12 +23,18 @@ class Analyzer:
         Returns:
             int: The frame index where the diffusion process starts.
         """
+
+        if self.diffusion_array.get_cached('diffusion_start_frame') is not None:
+            return self.diffusion_array.get_cached('diffusion_start_frame')
+
         arr = np.array(self.diffusion_array)
         arr = arr - gaussian_filter(np.mean(self.diffusion_array.frame('0:3'), axis=0), sigma=2)
 
         arr = np.diff(np.max(arr, axis=(1, 2)))
 
-        return int(np.argmax(arr))
+        ans = int(np.argmax(arr))
+        self.diffusion_array.cache(diffusion_start_frame=ans)
+        return ans
 
     def detect_diffusion_start_place(self) -> tuple:
         """
@@ -38,6 +44,10 @@ class Analyzer:
         Returns:
             tuple: The coordinates (row, column) of the place where the diffusion process starts.
         """
+
+        if self.diffusion_array.get_cached('diffusion_start_place') is not None:
+            return self.diffusion_array.get_cached('diffusion_start_place')
+
         start_frame_number = self.detect_diffusion_start_frame()
         frame = self.diffusion_array.frame(start_frame_number + 1)
         frame = frame - np.mean(self.diffusion_array.frame(slice(start_frame_number - 1, start_frame_number + 1)),
@@ -55,6 +65,7 @@ class Analyzer:
         weighted_cols = np.sum(frame * cols) / total_intensity
         place = (round(weighted_rows), round(weighted_cols))
 
+        self.diffusion_array.cache(diffusion_start_place=place)
         return place
 
     def apply_for_each_frame(self, function: callable,
