@@ -1,4 +1,6 @@
+import cv2
 import numpy as np
+from matplotlib import pyplot as plt
 from scipy.ndimage import gaussian_filter
 
 from diffusion_array import DiffusionArray
@@ -36,7 +38,7 @@ class Analyzer:
         self.diffusion_array.cache(diffusion_start_frame=ans)
         return ans
 
-    def detect_diffusion_start_place(self) -> tuple:
+    def detect_diffusion_start_place(self, strategy='connected-components', **kwargs) -> tuple:
         """
         Detects the place where the diffusion process starts based on the maximum differences between 2 consecutive
         frames. Assumes that the process never starts in the first 2 frames
@@ -45,6 +47,82 @@ class Analyzer:
             tuple: The coordinates (row, column) of the place where the diffusion process starts.
         """
 
+        use_inner = kwargs.get('use_inner', False)
+
+        if self.diffusion_array.get_cached(f'diffusion_start_place {strategy}') is not None and not use_inner:
+            return self.diffusion_array.get_cached(f'diffusion_start_place {strategy}')
+
+        if self.diffusion_array.get_cached(f'diffusion_start_place {strategy}_use_inner') is not None and use_inner:
+            return self.diffusion_array.get_cached(f'diffusion_start_place {strategy}_use_inner')
+
+        def save_and_return(place, strategy=strategy):
+            kwargs_dict = {f'diffusion_start_place {strategy}': place}
+            self.diffusion_array.cache(**kwargs_dict)
+            return place
+
+        start_frame_number = self.detect_diffusion_start_frame()
+        frame = self.diffusion_array.frame(start_frame_number + 1)
+        frame = frame - np.mean(self.diffusion_array.frame(slice(start_frame_number - 1, start_frame_number + 1)),
+                                axis=0)
+
+        place = np.unravel_index(np.argmax(np.abs(frame)), frame.shape)
+
+        if strategy == 'biggest-difference':
+            return save_and_return((place[1], place[0]))
+
+        if strategy == 'weighted-centroid':
+            frame[frame < 0] = 0
+            radius = int(((frame.shape[0] * frame.shape[1]) ** (1 / 2)) / 3)
+            frame[Mask.circle(frame.shape, place, radius).flip().ndarray] = 0
+
+            # centroid
+            total_intensity = np.sum(frame, dtype=np.int64)
+            rows, cols = np.indices(frame.shape)
+            weighted_rows = np.sum(frame * rows, dtype=np.int64) / total_intensity
+            weighted_cols = np.sum(frame * cols, dtype=np.int64) / total_intensity
+
+            place = (round(weighted_rows), round(weighted_cols))
+            return save_and_return(place)
+
+        if strategy == 'connected-components':
+            med = np.percentile(frame.flatten(), 67)
+            frame_copy = frame.copy()
+
+            frame[frame < med] = med - 1
+            frame[frame >= med] = 255
+            frame[frame == med - 1] = 0
+
+            image_uint8 = frame.astype(np.uint8)
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            image_uint8 = cv2.morphologyEx(image_uint8, cv2.MORPH_OPEN, kernel)
+
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(image_uint8, 4)
+            largest_label = np.argmax(stats[1:, cv2.CC_STAT_AREA]) + 1
+            center_x, center_y = centroids[largest_label]
+
+            if not use_inner:
+                return save_and_return((center_x, center_y))
+
+            med = np.percentile(frame_copy.flatten(), 45)
+            frame_copy[frame_copy < med] = med - 1
+            frame_copy[frame_copy >= med] = 255
+            frame_copy[frame_copy == med - 1] = 0
+            image_uint8 = frame_copy.astype(np.uint8)
+            image_uint8 = cv2.morphologyEx(image_uint8, cv2.MORPH_OPEN, kernel)
+            image_uint8 = 255 - image_uint8
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(image_uint8, 4)
+            distances = np.sqrt((centroids[:, 0] - center_x) ** 2 + (centroids[:, 1] - center_y) ** 2)
+            closest_label = np.argmin(distances)
+            closest_x, closest_y = centroids[closest_label]
+
+            strategy = strategy + '_use_inner'
+            return save_and_return((closest_x, closest_y), strategy=strategy)
+
+        raise ValueError(f"Unknown strategy ({strategy}). It must be either 'connected-components', 'weighted-centroid'"
+                         f" or 'biggest-difference'.")
+
+    def plotting_idk(self):
         if self.diffusion_array.get_cached('diffusion_start_place') is not None:
             return self.diffusion_array.get_cached('diffusion_start_place')
 
@@ -53,20 +131,92 @@ class Analyzer:
         frame = frame - np.mean(self.diffusion_array.frame(slice(start_frame_number - 1, start_frame_number + 1)),
                                 axis=0)
 
-        place = np.unravel_index(np.argmax(frame), frame.shape)
-        frame[frame < 0] = 0
-        radius = int(((frame.shape[0] * frame.shape[1]) ** (1 / 2)) / 3)
-        frame[Mask.circle(frame.shape, place, radius).flip().ndarray] = 0
+        place = np.unravel_index(np.argmax(np.abs(frame)), frame.shape)
+        # frame[frame < 0] = 0
+        # radius = int(((frame.shape[0] * frame.shape[1]) ** (1 / 2)) / 3)
+        # frame[Mask.circle(frame.shape, place, radius).flip().ndarray] = 0
 
         # centroid
-        total_intensity = np.sum(frame)
-        rows, cols = np.indices(frame.shape)
-        weighted_rows = np.sum(frame * rows) / total_intensity
-        weighted_cols = np.sum(frame * cols) / total_intensity
-        place = (round(weighted_rows), round(weighted_cols))
+        # total_intensity = np.sum(frame, dtype=np.int64)
+        # rows, cols = np.indices(frame.shape)
+        # weighted_rows = np.sum(frame * rows, dtype=np.int64) / total_intensity
+        # weighted_cols = np.sum(frame * cols, dtype=np.int64) / total_intensity
+        #
+        # plt.scatter(place[1], place[0], color='green', alpha=.5)
+        # place = (round(weighted_rows), round(weighted_cols))
+        # self.diffusion_array.cache(diffusion_start_place=place)
 
-        self.diffusion_array.cache(diffusion_start_place=place)
-        return place
+        frame_copy = frame.copy()
+        med = np.percentile(frame.flatten(), 67)
+        # np.min(frame.flatten())
+        print('med: ', med)
+        # frame = gaussian_filter(frame, sigma=2)
+
+        plt.imshow(frame)
+        frame[frame < med] = med - 1
+        frame[frame >= med] = 255
+        frame[frame == med - 1] = 0
+        plt.scatter(place[1], place[0], color='red', alpha=.5)
+
+        # % works finish if med = 50% and morph is 3 by 3
+        # % works better if med = 60% and morph is 3 by 3 and is inverted
+
+        # image_scaled = (frame - np.min(frame)) / (np.max(frame) - np.min(frame))  # Normalize to (0, 1) range
+        # image_uint8 = (image_scaled * 255.0).astype(np.uint8)
+        image_uint8 = frame.astype(np.uint8)
+
+        # image_uint8 = 255 - image_uint8
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        image_uint8 = cv2.morphologyEx(image_uint8, cv2.MORPH_OPEN, kernel)
+        # image_uint8 = 255 - image_uint8
+
+        # --- !!! ---
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(image_uint8, 4)
+
+        # Find the index of the largest connected component (excluding background component)
+        sorted_indices = np.argsort(stats[1:, cv2.CC_STAT_AREA]) + 1
+        display_image = cv2.cvtColor(image_uint8, cv2.COLOR_GRAY2BGR)
+
+        center_x, center_y = (0, 0)
+        for i in range(1, 2):
+            try:
+                comp_index = sorted_indices[-i]
+                if i == 1:
+                    center_x, center_y = centroids[comp_index]
+                component_mask = (labels == comp_index).astype(np.uint8)
+                color = np.random.randint(0, 256, size=3).tolist()
+                display_image[component_mask > 0] = color
+            except IndexError:
+                pass
+
+        med = np.percentile(frame_copy.flatten(), 45)
+        print('med 2: ', med)
+        frame_copy[frame_copy < med] = med - 1
+        frame_copy[frame_copy >= med] = 255
+        frame_copy[frame_copy == med - 1] = 0
+        image_uint8 = frame_copy.astype(np.uint8)
+        image_uint8 = cv2.morphologyEx(image_uint8, cv2.MORPH_OPEN, kernel)
+        image_uint8 = 255 - image_uint8
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(image_uint8, 4)
+        distances = np.sqrt((centroids[:, 0] - center_x) ** 2 + (centroids[:, 1] - center_y) ** 2)
+        closest_label = np.argmin(distances)
+        closest_x, closest_y = centroids[closest_label]
+        component_mask = (labels == closest_label).astype(np.uint8)
+        color = np.random.randint(0, 256, size=3).tolist()
+        display_image[component_mask > 0] = color
+
+        # Display the largest connected component
+        cv2.imshow('Largest Connected Component', display_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        plt.scatter(center_x, center_y, color='orange', alpha=.5)
+
+        old_start_x, old_start_y = self.detect_diffusion_start_place()
+        plt.scatter(old_start_x, old_start_y, color='green', alpha=.5)
+        plt.scatter(closest_x, closest_y, color='pink', alpha=.5)
+        plt.show()
+        # self.diffusion_array.cache(diffusion_start_place=place_2)
 
     def apply_for_each_frame(self, function: callable,
                              remove_background: bool = False,

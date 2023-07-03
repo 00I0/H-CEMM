@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 from lmfit import Model
-from matplotlib import pyplot as plt, gridspec
+from matplotlib import pyplot as plt, gridspec, patches
 
 from analyzer import Analyzer
 from diffusion_array import DiffusionArray
@@ -32,7 +32,7 @@ def generate_homogenized_npz(directory: str, diff=2):
     for filename in os.listdir(directory):
         if filename.endswith(".nd2"):
             file_path = os.path.join(directory, filename)
-            npz_filename = os.path.splitext(filename)[0] + "_homogenized_avg.npz"
+            npz_filename = os.path.splitext(filename)[0] + "_homogenized_avg_centroid.npz"
             npz_filepath = os.path.join(directory, npz_filename)
 
             darr = DiffusionArray(file_path).channel(0)
@@ -115,23 +115,9 @@ def plot_exp_fit(darr):
     plt.show()
 
 
-def main():
-    filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec006.nd2'
-    # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl017.nd2'
-    # filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'
-    # darr = DiffusionArray(filename)
-    # darr = darr.channel(0)
-    #
-    # star_mask = Mask.star(darr.channel(0).frame(0)[:])
-    # fig, ax = plt.subplots(figsize=(10, 8))
-    #
-    # ax.imshow(darr.channel(0).frame(0))
-    # ax.imshow(star_mask.for_frame(0), cmap='jet', alpha=.3)
-    # plt.show()
-
-    directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
-    fig = plt.figure(figsize=(40, 36))
-    gs = gridspec.GridSpec(5, 7, width_ratios=[1, 1, 1, 0.05, 1, 1, 1])
+def plot_start(directories):
+    fig = plt.figure(figsize=(20, 15))
+    gs = gridspec.GridSpec(3, 4)
     i = 0
     for directory in directories:
         for filename in os.listdir(directory):
@@ -141,59 +127,82 @@ def main():
                 darr = DiffusionArray(file_path).channel(0)
 
                 analyzer = Analyzer(darr.channel(0))
-                start_frame = analyzer.detect_diffusion_start_frame()
-                start_place = analyzer.detect_diffusion_start_place()
 
-                vmax = max(darr.frame(start_frame - 1)[:].max(),
-                           darr.frame(start_frame)[:].max(),
-                           darr.frame(start_frame + 1)[:].max()
-                           )
-
-                vmin = min(darr.frame(start_frame - 1)[:].min(),
-                           darr.frame(start_frame)[:].min(),
-                           darr.frame(start_frame + 1)[:].min()
-                           )
-
-                # ax = axes.flat[i // 2]
-                ax1 = plt.subplot(gs[i // 2, (i % 2) * 4 + 1])
-                ax1.imshow(darr.channel(0).frame(start_frame), vmax=vmax, vmin=vmin)
-                ax1.scatter(start_place[1], start_place[0], color='red', alpha=.5)
+                ax1 = plt.subplot(gs[i // 4, (i % 4)])
                 ax1.tick_params(label1On=False, tick1On=False)
-                ax1.set_title('detected start')
                 ax1.set_title(filename)
 
-                ax2 = plt.subplot(gs[i // 2, (i % 2) * 4 + 0])
-                ax2.imshow(darr.channel(0).frame(start_frame - 1), vmax=vmax, vmin=vmin)
-                ax2.tick_params(label1On=False, tick1On=False)
-                ax2.set_title('start - 1')
+                # --
 
-                ax3 = plt.subplot(gs[i // 2, (i % 2) * 4 + 2])
-                ax3.imshow(darr.channel(0).frame(start_frame + 1), vmax=vmax, vmin=vmin)
-                ax3.tick_params(label1On=False, tick1On=False)
-                ax3.set_title('start + 1')
-                ax3.scatter(start_place[1], start_place[0], color='red', alpha=.5)
+                start_frame_number = analyzer.detect_diffusion_start_frame()
+                frame = darr.frame(start_frame_number + 1)
+                frame = frame - np.mean(darr.frame(slice(start_frame_number - 1, start_frame_number + 1)), axis=0)
+                ax1.imshow(frame)
+
+                diff_x, diff_y = analyzer.detect_diffusion_start_place(strategy='biggest-difference')
+                ax1.scatter(diff_x, diff_y, color='red', alpha=.5)
+
+                center_x, center_y = analyzer.detect_diffusion_start_place(strategy='connected-components')
+                ax1.scatter(center_x, center_y, color='orange', alpha=.5)
+
+                closest_x, closest_y = analyzer.detect_diffusion_start_place(strategy='connected-components',
+                                                                             use_inner=True)
+                ax1.scatter(closest_x, closest_y, color='pink', alpha=.5)
+
+                old_start_x, old_start_y = analyzer.detect_diffusion_start_place(strategy='weighted-centroid')
+                ax1.scatter(old_start_x, old_start_y, color='green', alpha=.5)
+
+                # --
 
                 i = i + 1
 
     fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.96, bottom=0.01)
-    title = 'f-avg(-1,1) r=d3'
+    title = 'cc centroids'
     fig.suptitle(title)
+    fig.legend(
+        [patches.Circle((0, 0), radius=0.2, facecolor=c) for c in ('red', 'orange', 'pink', 'green')],
+        ['biggest-difference', 'connected-components', 'connected-components_inner', 'weighted-centroid'],
+        loc='lower right'
+    )
     plt.savefig(f'{title}.pdf')
     plt.show()
-    r = 300
-    analyzer = Analyzer(darr)
-    start_place = analyzer.detect_diffusion_start_place()
-    start_frame = analyzer.detect_diffusion_start_frame()
-    circle_mask = Mask.circle(darr.shape, start_place, r)
-    cell_mask = Mask.cell(darr[:], start_place, r, analyzer.apply_for_each_frame(np.mean, mask=circle_mask))
 
-    fig, ax = plt.subplots(figsize=(10, 8))
 
-    ax.imshow(darr.frame(start_frame + 4))
-    ax.imshow(cell_mask.for_frame(start_frame + 4), cmap='jet', alpha=.3)
-    plt.show()
+def main():
+    directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
+    # filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec008.nd2'
+    # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl018.nd2'  # 17 dead w/ 50%   10 dead w/ 5%
+    # filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'  # 001 dead if inverted 60%
+    # darr = DiffusionArray(filename)
+    # darr = darr.channel(0)
+
+    # analyzer = Analyzer(darr)
+    # analyzer.plotting_idk()
+    # start_place = analyzer.detect_diffusion_start_place()
+
+    # star_mask = Mask.star(darr.channel(0).frame(0)[:])
+    # fig, ax = plt.subplots(figsize=(10, 8))
+    #
+    # ax.imshow(darr.channel(0).frame(0))
+    # ax.imshow(star_mask.for_frame(0), cmap='jet', alpha=.3)
+    # plt.show()
+
+    # r = 300
+    # analyzer = Analyzer(darr)
+    # start_place = analyzer.detect_diffusion_start_place()
+    # start_frame = analyzer.detect_diffusion_start_frame()
+    # circle_mask = Mask.circle(darr.shape, start_place, r)
+    # cell_mask = Mask.cell(darr[:], start_place, r, analyzer.apply_for_each_frame(np.mean, mask=circle_mask))
+    #
+    # fig, ax = plt.subplots(figsize=(10, 8))
+    #
+    # ax.imshow(darr.frame(start_frame + 4))
+    # ax.imshow(cell_mask.for_frame(start_frame + 4), cmap='jet', alpha=.3)
+    # plt.show()
 
     # plot_start_neighbourhood(darr, super_title='1133_3_laser@30sec006')
+    # plot_start(directories)
+    # generate_homogenized_npz('G:\\rost\\Ca2+_laser')
 
 
 if __name__ == '__main__':

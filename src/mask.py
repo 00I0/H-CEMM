@@ -163,7 +163,7 @@ class Mask:
         return Mask(mask.astype(bool))
 
     @staticmethod
-    def star(diffusion_array: np.ndarray, cutoff_extractor: callable = lambda x: np.percentile(x, 95)) -> 'Mask':
+    def star(diffusion_array: np.ndarray, cutoff_extractor: callable = lambda x: np.percentile(x, 99.5)) -> 'Mask':
         """
         Create a mask by thresholding a diffusion array based on a cutoff value. It's useful for identifying the bright
         values at the start of the diffusion process.
