@@ -168,6 +168,41 @@ def plot_start(directories):
     plt.show()
 
 
+def plot_homogenized(directories):
+    fig = plt.figure(figsize=(20, 15))
+    gs = gridspec.GridSpec(3, 4)
+    i = 0
+    for directory in directories:
+        for filename in os.listdir(directory):
+            if filename.endswith(".npz") and 'centroid' not in filename and 'homogenized' in filename:
+                print('processing: ', filename)
+                file_path = os.path.join(directory, filename)
+                darr = DiffusionArray(file_path).channel(0)
+
+                analyzer = Analyzer(darr.channel(0))
+
+                ax1 = plt.subplot(gs[i // 4, (i % 4)])
+                ax1.tick_params(label1On=False, tick1On=False)
+                parts = filename.split("_")
+                new_filename = "_".join(parts[:-3])
+                ax1.set_title(new_filename)
+
+                # --
+
+                start_frame_number = analyzer.detect_diffusion_start_frame()
+                frame = darr.frame(start_frame_number + 1)
+                frame = frame - np.mean(darr.frame(slice(start_frame_number - 1, start_frame_number + 1)), axis=0)
+                ax1.imshow(frame)
+
+                i = i + 1
+
+    fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.96, bottom=0.01)
+    title = 'avg'
+    fig.suptitle(title)
+    plt.savefig(f'{title}.pdf')
+    plt.show()
+
+
 def main():
     directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
     # filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec008.nd2'
@@ -202,7 +237,9 @@ def main():
 
     # plot_start_neighbourhood(darr, super_title='1133_3_laser@30sec006')
     # plot_start(directories)
-    # generate_homogenized_npz('G:\\rost\\Ca2+_laser')
+    # generate_homogenized_npz('G:\\rost\\kozep')
+    # generate_homogenized_npz('G:\\rost\\sarok')
+    plot_homogenized(directories)
 
 
 if __name__ == '__main__':
