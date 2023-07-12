@@ -159,7 +159,7 @@ class Analyzer:
                 difference = arr - gaussian_filter(mean, sigma=2)
             else:
                 difference = arr - mean
-            arr = arr.update_ndarray(difference)
+            arr = arr.updated_ndarray(difference)
 
         if mask is not None:
             applied = function(arr[mask], axis=1)

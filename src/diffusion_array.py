@@ -188,9 +188,9 @@ class DiffusionArray:
         """
         return self[:].shape
 
-    def update_ndarray(self, ndarray: np.ndarray) -> 'DiffusionArray':
+    def updated_ndarray(self, ndarray: np.ndarray) -> 'DiffusionArray':
         """
-        Updates the DiffusionArray with a new ndarray.
+        Creates a new DiffusionArray with a new ndarray.
 
         Parameters:
             ndarray (np.ndarray): The new ndarray to update the DiffusionArray.

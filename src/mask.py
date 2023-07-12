@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 
 
@@ -59,6 +61,33 @@ class Mask:
         """
         return Mask(np.logical_not(self.ndarray))
 
+    def __and__(self, other: Union[np.ndarray, 'Mask']) -> 'Mask':
+        """ Returns a new Mask object created by combining 2 Masks by the logical and operator
+        Args:
+            other (Mask): The other mask
+
+        Returns:
+            Mask: The mask created by combining self with the other Mask provided by applying conjugation
+        """
+
+        if isinstance(other, np.ndarray):
+            return Mask(np.logical_and(self.ndarray, other))
+
+        return Mask(np.logical_and(self.ndarray, other.ndarray))
+
+    def __or__(self, other: Union[np.ndarray, 'Mask']) -> 'Mask':
+        """ Returns a new Mask object created by combining 2 Masks by the logical or operator
+                Args:
+                    other (Mask): The other mask
+
+                Returns:
+                    Mask: The mask created by combining self with the other Mask provided by applying disjunction
+                """
+
+        if isinstance(other, np.ndarray):
+            return Mask(np.logical_or(self.ndarray, other))
+        return Mask(np.logical_or(self.ndarray, other.ndarray))
+
     @staticmethod
     def circle(shape: tuple, center: tuple, radius: int | float) -> 'Mask':
         """Creates a circular mask with the specified shape, center, and radius.
@@ -89,7 +118,7 @@ class Mask:
 
         Args:
             shape (tuple): The shape of the mask in (rows, columns) format.
-            center (tuple): The center coordinates of the ring in (y, x) format.
+            center (tuple): The center coordinates of the ring in (x, y) format.
             inner_radius (int | float): The inner radius of the ring, inclusive.
             outer_radius (int | float): The outer radius of the ring, exclusive.
 
@@ -101,7 +130,7 @@ class Mask:
         rows, cols = shape
         x_indices, y_indices = np.meshgrid(np.arange(cols), np.arange(rows))
 
-        distances_sq = (x_indices - center[1]) ** 2 + (y_indices - center[0]) ** 2
+        distances_sq = (x_indices - center[0]) ** 2 + (y_indices - center[1]) ** 2
         ring = np.logical_and(distances_sq >= inner_radius ** 2, distances_sq < outer_radius ** 2)
 
         ndarray = np.zeros(shape=shape, dtype=bool)
@@ -129,19 +158,19 @@ class Mask:
         return Mask(ndarray)
 
     @staticmethod
-    def cell(diffusion_array: np.ndarray, center: tuple, radius: int | float,
-             cutoff_by_frame: np.ndarray) -> 'Mask':
+    def cell(diffusion_array: np.ndarray, cutoff_by_frame: np.ndarray | float | int) -> 'Mask':
         """
-        Generates a mask based on a circular mask and cutoff values for each frame. The mask tries to find the cells in
-        the given circular mask, in order to do so it uses a different cutoff value for each frame
+        Generates a mask based on cutoff values for each frame. The mask tries to find the cells.
         Args:
             diffusion_array (np.ndarray): the DiffusionArray as a np.ndarray
-            radius (int | float): The radius, giving bounds to the mask
-            center (tuple): The center around which cells should be detected
             cutoff_by_frame (np.ndarray): The cutoff values for each frame.
         Returns:
             np.ndarray: The cell mask as a boolean array.
         """
+
+        if isinstance(cutoff_by_frame, (int, float)):
+            cutoff_by_frame = np.full(diffusion_array.shape[0], cutoff_by_frame)
+
         if diffusion_array.ndim != 3:
             raise ValueError(f'diffusion_array must be 3D, but was: {diffusion_array.ndim}')
 
@@ -151,15 +180,9 @@ class Mask:
         if diffusion_array.shape[0] != len(cutoff_by_frame):
             raise ValueError(f'diffusion_array and cutoff_by_frame have the same number of frames')
 
-        mask_cir = np.zeros(shape=diffusion_array.shape)
-        circle_mask = Mask.circle(diffusion_array.shape, center, radius).ndarray
-        print(mask_cir.shape, circle_mask.shape)
-        mask_cir[:, circle_mask] = 1
+        mask = np.zeros(shape=diffusion_array.shape)
+        mask[diffusion_array >= cutoff_by_frame[:, np.newaxis, np.newaxis]] = 1
 
-        mask_cut = np.zeros(shape=diffusion_array.shape)
-        mask_cut[diffusion_array >= cutoff_by_frame[:, np.newaxis, np.newaxis]] = 1
-
-        mask = mask_cut * mask_cir
         return Mask(mask.astype(bool))
 
     @staticmethod
