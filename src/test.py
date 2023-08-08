@@ -35,7 +35,7 @@ def generate_homogenized_npz(directory: str, diff=2):
     for filename in os.listdir(directory):
         if filename.endswith(".nd2"):
             file_path = os.path.join(directory, filename)
-            npz_filename = os.path.splitext(filename)[0] + "_homogenized_avg_centroid_cell.npz"
+            npz_filename = os.path.splitext(filename)[0] + "_homogenized_avg.npz"
             npz_filepath = os.path.join(directory, npz_filename)
 
             darr = DiffusionArray(file_path).channel(0)
@@ -54,12 +54,14 @@ def generate_homogenized_npz(directory: str, diff=2):
                 if i % 100 == 0:
                     print(f'{filename:40s}--{i:4d}/{max_distance}')
                 ring_mask = Mask.ring(darr.shape, start_place, i, i + diff)
-                combined_mask = ring_mask & cell_mask
+                # combined_mask = ring_mask & cell_mask
                 combined_mask = ring_mask
 
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", category=RuntimeWarning)
-                    avg = np.nan_to_num(np.nanmean(copy[combined_mask]), nan=0).astype(int)
+                    # avg = np.nan_to_num(np.nanmean(darr_wo_bcg[combined_mask]), nan=0).astype(int)
+                    avg = analyzer.apply_for_each_frame(np.average, mask=combined_mask)
+                    avg = np.nan_to_num(avg, nan=0)
                     copy[ring_mask] = avg
 
             copy.save(npz_filepath)
@@ -186,7 +188,7 @@ def plot_homogenized(directories):
     for directory in directories:
         for filename in os.listdir(directory):
             if filename.endswith(".npz") \
-                    and 'centroid' in filename and 'homogenized' in filename and 'cell' not in filename:
+                    and 'centroid' in filename and 'homogenized' in filename and 'cell' in filename:
                 print('processing: ', filename)
                 file_path = os.path.join(directory, filename)
                 darr = DiffusionArray(file_path).channel(0)
@@ -198,9 +200,9 @@ def plot_homogenized(directories):
 
                 new_filename = re.sub(r'_homogenized.*$', '', filename)
 
-                ax1.scatter(*Analyzer(DiffusionArray(os.path.join(directory, new_filename) + '.nd2').channel(0))
-                            .detect_diffusion_start_place(),
-                            color='red')
+                # ax1.scatter(*Analyzer(DiffusionArray(os.path.join(directory, new_filename) + '.nd2').channel(0))
+                #             .detect_diffusion_start_place(),
+                #             color='red')
                 ax1.set_title(new_filename)
 
                 start_frame_number = analyzer.detect_diffusion_start_frame()
@@ -211,7 +213,7 @@ def plot_homogenized(directories):
                 i = i + 1
 
     fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.94, bottom=0.01)
-    title = 'homogenized on centroids'
+    title = 'homogenized on centroids (cell)'
     fig.suptitle(title)
     plt.savefig(f'{title}.pdf')
     plt.show()
@@ -450,7 +452,7 @@ def plot_inner_radi(filename):
     axs[1, 2].remove()
 
     plt.tight_layout()
-    plt.savefig('inner vs outer radii.pdf')
+    plt.savefig('inner vs outer radii (Ca2_008).pdf')
     plt.show()
 
 
@@ -458,20 +460,70 @@ def main():
     # generate_homogenized_npz(directory='G:\\rost\\kozep')
     # generate_homogenized_npz(directory='G:\\rost\\Ca2+_laser')
     # generate_homogenized_npz(directory='G:\\rost\\sarok')
-    directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
-    # filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec008.nd2'
-    # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl017.nd2'  # 17 dead w/ 50%   10 dead w/ 5%
-    # filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'  # 001 dead if inverted 60%
+    # directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
+    # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl018.nd2'  # 17 dead w/ 50%   10 dead w/ 5%
+    # filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec007.nd2'
+    filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'  # 001 dead if inverted 60%
 
     diff = 2
-    r = 300
 
-    # darr = DiffusionArray(filename)
-    # darr = darr.channel(0)
+    def show_r():
+        analyzer = Analyzer(DiffusionArray(filename).channel(0))
+        start_place = analyzer.detect_diffusion_start_place()
+        start_frame = analyzer.detect_diffusion_start_frame()
+        hom_file = re.sub(r'\.nd2', '_homogenized_avg.npz', filename)
+        darr = DiffusionArray(hom_file)
+        darr = darr.channel(0)
 
+        asd = darr.ndarray[:, 0, start_place[1], start_place[0]:].T
+        # asd = np.flip(asd, axis=0)
+        # plt.axis('off')
+
+        plt.figure(figsize=(8, 6))
+        plt.imshow(asd, aspect='auto')
+        plt.gca().invert_yaxis()
+        plt.ylabel('Distance from origin')
+        plt.xlabel('Frame')
+        plt.savefig(re.sub(r'\.nd2', '_homogenized_avg.png', filename))
+        # print(re.sub(r'\.nd2', '_homogenized_avg.png', filename))
+        plt.show()
+
+    show_r()
     # plot_inner_radi(filename)
 
-    plot_homogenized(directories)
+    # plot_homogenized(directories)
+
+    # darr = DiffusionArray(filename).channel(0)
+    #
+    # analyzer = Analyzer(darr)
+    # start_place = analyzer.detect_diffusion_start_place()
+    # start_frame = analyzer.detect_diffusion_start_frame()
+    # darr_wo_bcg = darr.updated_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
+    # darr_wo_bcg = darr.updated_ndarray(darr_wo_bcg[start_frame: start_frame + 11])
+    # analyzer = Analyzer(darr_wo_bcg)
+    # copy = darr_wo_bcg.copy()
+    # print(darr_wo_bcg.shape)
+    #
+    # size = darr.channel(0).frame(0).shape[0]  # assuming square
+    # ordered = sorted([start_place[0], start_place[1], size - start_place[0], size - start_place[1]])
+    # max_distance = ceil(sqrt(ordered[-1] ** 2 + ordered[-2] ** 2))
+    # cell_mask = Mask.cell(darr_wo_bcg[:], np.percentile(darr.frame(start_frame), 66)).for_frame(1)
+    # for i in range(0, max_distance, diff):
+    #     if i % 100 == 0:
+    #         print(f'{filename:40s}--{i:4d}/{max_distance}')
+    #     ring_mask = Mask.ring(darr.shape, start_place, i, i + diff)
+    #     combined_mask = ring_mask & cell_mask
+    #     # combined_mask = ring_mask
+    #
+    #     with warnings.catch_warnings():
+    #         warnings.filterwarnings("ignore", category=RuntimeWarning)
+    #         avg = np.nan_to_num(np.nanmean(darr_wo_bcg[combined_mask], axis=0), nan=0).astype(int)
+    #         copy[ring_mask] = avg
+    #
+    # plt.imshow(copy[10])
+    # plt.show()
+    # plt.imshow(copy[0])
+    # plt.show()
 
 
 if __name__ == '__main__':

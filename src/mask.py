@@ -171,8 +171,8 @@ class Mask:
         if isinstance(cutoff_by_frame, (int, float)):
             cutoff_by_frame = np.full(diffusion_array.shape[0], cutoff_by_frame)
 
-        if diffusion_array.ndim != 3:
-            raise ValueError(f'diffusion_array must be 3D, but was: {diffusion_array.ndim}')
+        if diffusion_array.ndim not in (2, 3):
+            raise ValueError(f'diffusion_array must be 2D or 3D, but was: {diffusion_array.ndim}')
 
         if cutoff_by_frame.ndim != 1:
             raise ValueError(f'cutoff_by_frame must be 1D, but was: {cutoff_by_frame.ndim}')
@@ -181,7 +181,10 @@ class Mask:
             raise ValueError(f'diffusion_array and cutoff_by_frame have the same number of frames')
 
         mask = np.zeros(shape=diffusion_array.shape)
-        mask[diffusion_array >= cutoff_by_frame[:, np.newaxis, np.newaxis]] = 1
+        if diffusion_array.ndim == 3:
+            mask[diffusion_array >= cutoff_by_frame[:, np.newaxis, np.newaxis]] = 1
+        elif diffusion_array.ndim == 2:
+            mask[diffusion_array >= cutoff_by_frame[0]] = 1
 
         return Mask(mask.astype(bool))
 

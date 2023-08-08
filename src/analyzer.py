@@ -67,7 +67,7 @@ class Analyzer:
         def save_and_return(place, strategy=strategy):
             kwargs_dict = {f'diffusion_start_place {strategy}': place}
             self.diffusion_array.cache(**kwargs_dict)
-            return place
+            return round(place[0]), round(place[1])
 
         start_frame_number = self.detect_diffusion_start_frame()
         frame = self.diffusion_array.frame(start_frame_number + 1)
