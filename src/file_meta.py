@@ -26,7 +26,7 @@ class FileMeta:
         """
 
         split = path.split(os.path.sep)
-        return FileMeta(split[-1], None, split[-2], None)
+        return FileMeta(split[-1], None, split[-2] if len(split) > 1 else '.', None)
 
     @staticmethod
     def _non_null_getter(getter):
