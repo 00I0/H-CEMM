@@ -1,7 +1,9 @@
+import os
+import re
 from abc import ABC, abstractmethod
-from typing import Iterator, Any
 
 import numpy as np
+from typing import Iterator, Any, Optional, List, Callable, Tuple
 
 from src.file_meta import FileMeta
 from src.mask import Mask
@@ -16,7 +18,9 @@ class DiffusionArray:
 
     def __init__(self, path: str | FileMeta | None, ndarray: np.ndarray | None = None):
         """
-        Constructs a DiffusionArray object by loading data from a file.
+        Constructs a DiffusionArray object by loading data from a file. If the data is already in memory a NumPy array
+        it could be passed as a NumPy array, in that case metadata about the file will not be created. The NumPy array
+        must contain the two spacial dimensions, the time dimension and optionally the channels.
 
         Parameters:
             path (str | FileMeta): The path to the file containing the diffusion data
@@ -38,17 +42,48 @@ class DiffusionArray:
                 self._meta = path
                 self._ndarray = Reader.of_type(path.name).read(path.name)
             else:
+                self._meta = FileMeta.from_path(path)
                 self._ndarray = Reader.of_type(path).read(path)
         else:
+            if ndarray.ndim not in (3, 4):
+                raise ValueError('The numpy array must contain the two spacial dimensions and the time dimension')
             self._ndarray = ndarray
 
         self._ndarray = self.ndarray.astype(np.int32)
 
         self._cached = {}
 
-        if self.ndarray.ndim != 4:
+        if self.ndarray.ndim == 3:
             # assuming channel dimension is missing TODO: dimension generating strategy
             self._ndarray = np.expand_dims(self.ndarray, axis=1)
+            self._index_strategy = self._index_strategy.channel_extracted(0)
+
+    @staticmethod
+    def get_all_from_directory(directory: str, regex: Optional[str] = '.*\\.(nd2|npz)$') -> List['DiffusionArray']:
+        """
+        Create DiffusionArray instances from files matching a regex pattern in a directory.
+
+        This method takes a directory path and an optional regex pattern as input, scans the directory
+        for files matching the pattern (or all files if no pattern is provided), and creates DiffusionArray
+        instances for each matching file.
+
+        Args:
+            directory (str): The directory path where files are located.
+            regex (str, optional): A regular expression pattern as a string.
+                If not provided, all files in the directory are considered matching.
+
+        Returns:
+            List[DiffusionArray]: A list of DiffusionArray instances created from matching files.
+        """
+        matching_files = []
+        regex = re.compile(regex)
+
+        for filename in os.listdir(directory):
+            filepath = os.path.join(directory, filename)
+            if os.path.isfile(filepath) and regex.match(filename):
+                matching_files.append(DiffusionArray(filepath))
+
+        return matching_files
 
     def save(self, path: str):
         """
@@ -164,7 +199,7 @@ class DiffusionArray:
         Returns the number of frames in the ndarray.
 
         Returns:
-        - int: The number of frames.
+            int: The number of frames.
         """
         return self.ndarray.shape[0]
 
@@ -174,9 +209,29 @@ class DiffusionArray:
         Returns the number of channels in the ndarray.
 
         Returns:
-        - int: The number of channels.
+            int: The number of channels.
         """
         return self.ndarray.shape[1]
+
+    @property
+    def width(self) -> int:
+        """
+        Returns the width of the ndarray.
+
+        Returns:
+            int: The width of the underlying ndarray
+        """
+        return self.ndarray.shape[-2]
+
+    @property
+    def height(self) -> int:
+        """
+        Returns the height of the ndarray.
+
+        Returns:
+            int: The height of the underlying ndarray
+        """
+        return self.ndarray.shape[-1]
 
     @property
     def shape(self) -> tuple:
@@ -187,6 +242,37 @@ class DiffusionArray:
             tuple: A tuple representing the shape of the object.
         """
         return self[:].shape
+
+    def resized(self, top_left: Tuple[int, int], bottom_right: Tuple[int, int]) -> 'DiffusionArray':
+        """
+        Crop and resize the DiffusionArray object to a new rectangular region defined by the 'top_left' and
+        'bottom_right' corners. Please ensure that both 'top_left' and 'bottom_right' are within a valid range of the
+        original arrays size and the rectangle defined by them has sides with positive lengths.
+
+        Args:
+            top_left (Tuple[int, int]): The (x, y) coordinates of the top-left corner of the new region.
+            bottom_right (Tuple[int, int]): THe (x, y) coordinates ot hte bottom-right corner of the new region.
+
+        Returns:
+            DiffusionArray: A new DiffusionArray containing with the cropped region.
+        """
+        first_x, first_y = top_left
+        end_x, end_y = bottom_right
+
+        if first_x < 0 or first_y < 0:
+            raise ValueError(f'top_left must have non-negative coordinates, but they were: ({first_x}, {first_y})')
+
+        if first_x >= end_x or first_y >= end_y:
+            raise ValueError(f'The pairwise difference of bottom_right and top_left must be positive, but it was: '
+                             f'({end_x - first_x}, {end_y - first_y})')
+
+        if end_y > self.height or end_x > self.width:
+            raise ValueError(f'The coordinates of bottom_right must be inside the height and width of the diffusion '
+                             f'array ({self.height}, {self.width}), but they were: ({end_x}, {end_y})')
+
+        return self.updated_ndarray(
+            self.ndarray[:, :, first_x: end_x, first_y: end_y]
+        )
 
     def updated_ndarray(self, ndarray: np.ndarray) -> 'DiffusionArray':
         """
@@ -200,8 +286,11 @@ class DiffusionArray:
         """
         darr = DiffusionArray(path=None, ndarray=ndarray)
         darr._index_strategy = self._index_strategy
-        if hasattr(self, '_meta'):
+
+        try:
             darr._meta = self.meta
+        except RuntimeError:
+            pass
         return darr
 
     def copy(self) -> 'DiffusionArray':
@@ -237,10 +326,10 @@ class DiffusionArray:
             FileMeta: The FileMeta object associated with the DiffusionArray.
 
         Raises:
-            ValueError: If the FileMeta object was not provided.
+            RuntimeError: If the FileMeta object was not provided.
         """
-        if self._meta is None:
-            raise ValueError('File meta was not provided')
+        if not hasattr(self, '_meta'):
+            raise RuntimeError('File meta was not provided')
         return self._meta
 
     def cache(self, **kwargs):
@@ -271,6 +360,41 @@ class DiffusionArray:
         except KeyError:
             return None
 
+    def normalized(self, new_min: int | float = 0, new_max: int | float = 1) -> 'DiffusionArray':
+        """
+        This method scales the values in the DiffusionArray object to be between 'new_min' and 'new_max'. Scaling is
+        performed using a linear operator where the minimum value in the array becomes 'new_min' and the maximum
+        'new_max'.
+
+        Args:
+            new_min (int | float): The minimum value for the scaled range (default is 0).
+            new_max (int | float): THe maximum value for the scaled range (default is 1).
+
+        Returns:
+            DiffusionArray: A new DiffusionArray object with values scaled to the given range.
+        """
+        min_value = self.ndarray.min()
+        max_value = self.ndarray.max()
+
+        normalized_array = new_min + (self.ndarray * (new_max - new_min) - min_value) / (max_value - min_value)
+        return self.updated_ndarray(normalized_array)
+
+    def background_removed(self, background_slices: str = '0:3', aggregator: Callable = np.mean) -> 'DiffusionArray':
+        """
+        This method removes the background form a DiffusionArray, by subtracting an aggregated background form all
+        frames. The aggregate background is constructed by applying the 'aggregator' function on the frames selected by
+        'background_slices'.
+
+        Args:
+            background_slices (str): A string specifying the slice range of frames to be used as background reference.
+            By default, it is '0:3'.
+            aggregator (Callable): A function to aggregate the selected frames. The default aggregator is np.mean.
+
+        Returns:
+            DiffusionArray: A new DiffusionArray object with the background removed.
+        """
+        return self.updated_ndarray(self[:] - aggregator(self.frame(background_slices), axis=0))
+
 
 # index: frame, channel, x, y
 class _IndexStrategy(ABC):
@@ -284,7 +408,7 @@ class _IndexStrategy(ABC):
     @abstractmethod
     def frame_extracted(self, frame) -> '_IndexStrategy':
         """
-        Modifies the index strategy to extract frame(s) from the ndarray.
+        Returns the appropriate index strategy to extract frame(s) from the ndarray.
 
         Parameters:
             frame: The index of the frame to extract.
@@ -297,7 +421,7 @@ class _IndexStrategy(ABC):
     @abstractmethod
     def channel_extracted(self, channel) -> '_IndexStrategy':
         """
-        Modifies the index strategy to extract channel(s) from the ndarray.
+        Returns the appropriate index strategy to extract channel(s) from the ndarray.
 
         Parameters:
             channel: The index of the channel to extract.
@@ -445,13 +569,36 @@ class _ChannelAndFrameExtractedIndexStrategy(_IndexStrategy):
         return iter(ndarray[self.frame, self.channel, :, :])
 
     def getitem(self, ndarray: np.ndarray, key: Any) -> Any:
+
+        if isinstance(key, Mask):
+            if isinstance(self.frame, int):
+                return ndarray[self.frame, self.channel, key.for_frame(self.frame)]
+
+            if isinstance(self.frame, slice):
+                selected = []
+                for i in range(self.frame.start, self.frame.stop, self.frame.step if None else 1):
+                    for_frame = key.for_frame(i)
+                    selected.append(ndarray[i, self.channel, for_frame])
+                try:
+                    return np.array(selected)
+                except ValueError:
+                    max_len = max(len(arr) for arr in selected)
+                    padded_selected = [np.pad(arr, (0, max_len - len(arr)), mode='empty') for arr in selected]
+                    return np.array(padded_selected)
+
+            else:
+                raise ValueError(f'Unexpected frame type ({type(self.frame)})')
+
         return ndarray[self.frame, self.channel, :, :][key]
 
     def setitem(self, ndarray: np.ndarray, key: Any, value: Any) -> np.ndarray:
         if isinstance(key, Mask):
             for_frame = key.for_frame(self.frame)
             if isinstance(value, np.ndarray):
-                ndarray[self.frame, self.channel, for_frame] = value[self.frame]
+                try:
+                    ndarray[self.frame, self.channel, for_frame] = value[self.frame]
+                except ValueError:
+                    ndarray[self.frame, self.channel, for_frame] = value[self.frame, np.newaxis]
             else:
                 ndarray[self.frame, self.channel, for_frame] = value
         else:

@@ -1,16 +1,18 @@
+import math
 import os
 import re
-import warnings
 from math import ceil, sqrt
 
 import numpy as np
 from lmfit import Model
 from matplotlib import pyplot as plt, gridspec, patches
+from matplotlib.axes import Axes
+from typing import List, Sequence, Tuple
 
 from analyzer import Analyzer
 from diffusion_array import DiffusionArray
-# it's just a playground... doesn't do anything related to the project
 from reader import ND2Reader
+from src.homogenizer import Homogenizer
 from src.mask import Mask
 
 
@@ -31,43 +33,51 @@ def create_files_in_directory(directory: str):
                 meta_file.write(meta)
 
 
-def generate_homogenized_npz(directory: str, diff=2):
-    for filename in os.listdir(directory):
-        if filename.endswith(".nd2"):
-            file_path = os.path.join(directory, filename)
-            npz_filename = os.path.splitext(filename)[0] + "_homogenized_avg.npz"
-            npz_filepath = os.path.join(directory, npz_filename)
+def homogenize_directory(
+        input_directory: str,
+        select_regex: str = '.*\\.nd2',
+        output_suffix: str = '_homogenized_average.npz',
+        output_directory: str | None = None,
+        homogenizer_builder: Homogenizer.Builder = Homogenizer.Builder().remove_background()
+) -> None:
+    """
+    This method creates the homogenized versions of specific files in a directory. You can specify the diffusion process
+    by changing the default homogenizer_builder. For example if you want to exclude the highest intensities you can use
+    Homogenizer.Builder().filter_out_high_intensities(). To load the diffusion data from a directory this function
+    delegates to DiffusionArray.get_all_from_directory.
 
-            darr = DiffusionArray(file_path).channel(0)
-            analyzer = Analyzer(darr)
-            start_place = analyzer.detect_diffusion_start_place()
-            start_frame = analyzer.detect_diffusion_start_frame()
-            darr_wo_bcg = darr.updated_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
-            analyzer = Analyzer(darr_wo_bcg)
-            copy = darr_wo_bcg.copy()
+    Args:
+        input_directory (str): The director where the input data is located.
+        select_regex (str): Only files with names matching this regex in the input_directory will be used as inputs.
+        output_suffix (str): The suffix for each output with extension. The original files extension will be replaced
+        with this. Example (output_suffix = 'avg.npz'): '1472@laser001.nd2' -> '1472@laser001_avg.npz'.
+        output_directory (str | None): The directory where the homogenized data is to be saved. If None the input
+        directory will be used.
+        homogenizer_builder (Homogenizer.Builder): A builder object to customize the homogenization process.
 
-            size = darr.channel(0).frame(0).shape[0]  # assuming square
-            ordered = sorted([start_place[0], start_place[1], size - start_place[0], size - start_place[1]])
-            max_distance = ceil(sqrt(ordered[-1] ** 2 + ordered[-2] ** 2))
-            cell_mask = Mask.cell(darr_wo_bcg[:], np.percentile(darr.frame(start_frame), 66)).for_frame(start_frame + 1)
-            for i in range(0, max_distance, diff):
-                if i % 100 == 0:
-                    print(f'{filename:40s}--{i:4d}/{max_distance}')
-                ring_mask = Mask.ring(darr.shape, start_place, i, i + diff)
-                # combined_mask = ring_mask & cell_mask
-                combined_mask = ring_mask
+    Returns:
+        None
+    """
 
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", category=RuntimeWarning)
-                    # avg = np.nan_to_num(np.nanmean(darr_wo_bcg[combined_mask]), nan=0).astype(int)
-                    avg = analyzer.apply_for_each_frame(np.average, mask=combined_mask)
-                    avg = np.nan_to_num(avg, nan=0)
-                    copy[ring_mask] = avg
+    if output_directory is None:
+        output_directory = input_directory
 
-            copy.save(npz_filepath)
+    diffusion_arrays = DiffusionArray.get_all_from_directory(input_directory, regex=select_regex)
+
+    for diffusion_array in diffusion_arrays:
+        analyzer = Analyzer(diffusion_array.channel(0))
+        start_place = analyzer.detect_diffusion_start_place()
+        start_frame = analyzer.detect_diffusion_start_frame()
+
+        homogenized_name = diffusion_array.meta.name + output_suffix
+        homogenized_path = os.path.join(output_directory, homogenized_name)
+
+        homogenizer = homogenizer_builder.start_frame(start_frame).center_point(start_place).build()
+        homogenized = homogenizer.homogenize(diffusion_array)
+        homogenized.save(homogenized_path)
 
 
-def plot_start_neighbourhood(darr: DiffusionArray, start_frame=None, start_place=None, super_title=None):
+def plot_start_neighbourhood(darr: DiffusionArray, start_frame=None, start_place=None, title=None):
     analyzer = Analyzer(darr.channel(0))
     if start_frame is None:
         start_frame = analyzer.detect_diffusion_start_frame()
@@ -76,33 +86,33 @@ def plot_start_neighbourhood(darr: DiffusionArray, start_frame=None, start_place
 
     fig, axes = plt.subplots(1, 3, figsize=(20, 8))
 
-    vmax = max(darr.frame(start_frame - 1)[:].max(),
-               darr.frame(start_frame)[:].max(),
-               darr.frame(start_frame + 1)[:].max()
-               )
+    v_max = max(darr.frame(start_frame - 1)[:].max(),
+                darr.frame(start_frame)[:].max(),
+                darr.frame(start_frame + 1)[:].max()
+                )
 
-    vmin = min(darr.frame(start_frame - 1)[:].min(),
-               darr.frame(start_frame)[:].min(),
-               darr.frame(start_frame + 1)[:].min()
-               )
+    v_min = min(darr.frame(start_frame - 1)[:].min(),
+                darr.frame(start_frame)[:].min(),
+                darr.frame(start_frame + 1)[:].min()
+                )
 
-    axes[1].imshow(darr.channel(0).frame(start_frame), vmax=vmax, vmin=vmin)
+    axes[1].imshow(darr.channel(0).frame(start_frame), vmax=v_max, vmin=v_min)
     axes[1].scatter(start_place[1], start_place[0], color='red', alpha=.5)
     axes[1].tick_params(label1On=False, tick1On=False)
     axes[1].set_title('detected start')
 
-    axes[0].imshow(darr.channel(0).frame(start_frame - 1), vmax=vmax, vmin=vmin)
+    axes[0].imshow(darr.channel(0).frame(start_frame - 1), vmax=v_max, vmin=v_min)
     axes[0].tick_params(label1On=False, tick1On=False)
     axes[0].set_title('start - 1')
-    axes[2].imshow(darr.channel(0).frame(start_frame + 1), vmax=vmax, vmin=vmin)
+    axes[2].imshow(darr.channel(0).frame(start_frame + 1), vmax=v_max, vmin=v_min)
     axes[2].tick_params(label1On=False, tick1On=False)
     axes[2].set_title('start + 1')
     axes[2].scatter(start_place[1], start_place[0], color='red', alpha=.5)
     plt.subplots_adjust(wspace=0.02, left=0.05, right=0.95, top=0.95, bottom=0.05)
 
-    if super_title is not None:
-        fig.suptitle(super_title)
-    # plt.show()
+    if title is not None:
+        fig.suptitle(title)
+    plt.show()
 
 
 def plot_exp_fit(darr):
@@ -110,7 +120,8 @@ def plot_exp_fit(darr):
     start_frame = analyzer.detect_diffusion_start_frame()
     maxes = analyzer.apply_for_each_frame(np.max, remove_background=True, normalize=True)
 
-    exponential_decay = lambda x, a, b: a * np.exp(-b * x)
+    def exponential_decay(x, a, b):
+        a * np.exp(-b * x)
 
     model = Model(exponential_decay)
     y = maxes[np.argmax(maxes):]
@@ -120,7 +131,8 @@ def plot_exp_fit(darr):
     params['b'].min = 0
     result = model.fit(y, params, x=x)
 
-    r_squared_text = f'R-squared: {result.rsquared:.4f}\n a: {result.best_values["a"]:.2f}, b: {result.best_values["b"]:.2f}'
+    r_squared_text = (f'R-squared: {result.rsquared:.4f}\n a: {result.best_values["a"]:.2f}, '
+                      f'b: {result.best_values["b"]:.2f}')
     plt.plot(maxes, 'bo', label='Data')
     plt.plot(x, result.best_fit, 'r-', label='Best Fit')
     plt.axvline(x=start_frame, label='Start Frame', color='green')
@@ -128,56 +140,69 @@ def plot_exp_fit(darr):
     plt.show()
 
 
-def plot_start(directories):
-    fig = plt.figure(figsize=(20, 15))
-    gs = gridspec.GridSpec(3, 4)
-    i = 0
-    for directory in directories:
-        for filename in os.listdir(directory):
-            if filename.endswith(".nd2"):
-                print('processing: ', filename)
-                file_path = os.path.join(directory, filename)
-                darr = DiffusionArray(file_path).channel(0)
+def plot_starting_place_finder_comparisons(
+        diffusion_arrays: List[DiffusionArray] | DiffusionArray,
+        strategies: Sequence[str] = ('biggest-difference', 'connected-components', 'weighted-centroid'),
+        title: str = 'start place detection comparisons'
+) -> None:
+    """
+    This method creates a plot to show the difference between the different start place finder algorithms of the
+    Analyzer class. The method shows the start_frame with the background removed for each diffusion array. The start
+    places found by the different algorithms will also be shown with a uniquely colored circle.
 
-                analyzer = Analyzer(darr.channel(0))
+    Args:
+        diffusion_arrays (List[DiffusionArray] | DiffusionArray): The diffusion arrays on which the algorithms should be
+        compared. If a single DiffusionArray is provided it will be treated as a list with only one entry.
+        strategies (Sequence[str]): The name of the different algorithms, used as the 'strategy' parameter in
+        Analyzer.detect_diffusion_start_place.
+        title (str): The title for the plot.
 
-                ax1 = plt.subplot(gs[i // 4, (i % 4)])
-                ax1.tick_params(label1On=False, tick1On=False)
-                ax1.set_title(filename)
+    Returns:
+        None
+    """
 
-                # --
+    if isinstance(diffusion_arrays, DiffusionArray):
+        diffusion_arrays = [diffusion_arrays]
 
-                start_frame_number = analyzer.detect_diffusion_start_frame()
-                frame = darr.frame(start_frame_number + 1)
-                frame = frame - np.mean(darr.frame(slice(start_frame_number - 1, start_frame_number + 1)), axis=0)
-                ax1.imshow(frame)
+    colors = ['lime', 'silver', 'red', 'purple', 'orange', 'pink', 'brown', 'cyan', 'magenta', 'yellow']
 
-                diff_x, diff_y = analyzer.detect_diffusion_start_place(strategy='biggest-difference')
-                ax1.scatter(diff_x, diff_y, color='red', alpha=.5)
+    # TODO analyzer.detect_diffusion_start_place(strategy='connected-components', use_inner=True)
 
-                center_x, center_y = analyzer.detect_diffusion_start_place(strategy='connected-components')
-                ax1.scatter(center_x, center_y, color='orange', alpha=.5)
+    height = ceil((-1 + sqrt(1 + 3 * len(diffusion_arrays))) / 2)
+    width = round(4 / 3 * height)
 
-                closest_x, closest_y = analyzer.detect_diffusion_start_place(strategy='connected-components',
-                                                                             use_inner=True)
-                ax1.scatter(closest_x, closest_y, color='pink', alpha=.5)
+    if width * height < len(diffusion_arrays):
+        height += 1
+        width = round(4 / 3 * height)
 
-                old_start_x, old_start_y = analyzer.detect_diffusion_start_place(strategy='weighted-centroid')
-                ax1.scatter(old_start_x, old_start_y, color='green', alpha=.5)
+    fig = plt.figure(figsize=(width * 5, height * 5))
+    gs = gridspec.GridSpec(height, width)
 
-                # --
+    for i, diffusion_array in enumerate(diffusion_arrays):
+        diffusion_array = diffusion_array.channel(0)
 
-                i = i + 1
+        ax: Axes = plt.subplot(gs[i // width, (i % width)])
+        if len(diffusion_arrays) != 1:
+            ax.set_title(diffusion_array.meta.name)
+        ax.tick_params(label1On=False, tick1On=False)
 
-    fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.96, bottom=0.01)
-    title = 'cc centroids'
+        analyzer = Analyzer(diffusion_array)
+        start_frame = analyzer.detect_diffusion_start_frame()
+        diffusion_array = diffusion_array.background_removed()
+        ax.imshow(diffusion_array.frame(start_frame))
+
+        for color, strategy in zip(colors, strategies):
+            point = analyzer.detect_diffusion_start_place(strategy=strategy)
+            ax.scatter(*point, color=color, alpha=.5)
+
+    fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.90, bottom=0.01)
     fig.suptitle(title)
     fig.legend(
-        [patches.Circle((0, 0), radius=0.2, facecolor=c) for c in ('red', 'orange', 'pink', 'green')],
-        ['biggest-difference', 'connected-components', 'connected-components_inner', 'weighted-centroid'],
+        [patches.Circle((0, 0), radius=0.2, facecolor=c) for c in colors[:len(strategies)]],
+        strategies,
         loc='lower right'
     )
-    plt.savefig(f'{title}.pdf')
+    plt.tight_layout()
     plt.show()
 
 
@@ -187,8 +212,7 @@ def plot_homogenized(directories):
     i = 0
     for directory in directories:
         for filename in os.listdir(directory):
-            if filename.endswith(".npz") \
-                    and 'centroid' in filename and 'homogenized' in filename and 'cell' in filename:
+            if filename.endswith('_avg.npz'):
                 print('processing: ', filename)
                 file_path = os.path.join(directory, filename)
                 darr = DiffusionArray(file_path).channel(0)
@@ -200,170 +224,87 @@ def plot_homogenized(directories):
 
                 new_filename = re.sub(r'_homogenized.*$', '', filename)
 
-                # ax1.scatter(*Analyzer(DiffusionArray(os.path.join(directory, new_filename) + '.nd2').channel(0))
-                #             .detect_diffusion_start_place(),
-                #             color='red')
                 ax1.set_title(new_filename)
 
                 start_frame_number = analyzer.detect_diffusion_start_frame()
                 frame = darr.frame(start_frame_number + 1)
-                frame = frame - np.mean(darr.frame(slice(start_frame_number - 1, start_frame_number + 1)), axis=0)
+                frame = frame[:] - np.mean(darr.frame(slice(start_frame_number - 1, start_frame_number + 1)), axis=0)
                 ax1.imshow(frame)
 
                 i = i + 1
 
     fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.94, bottom=0.01)
-    title = 'homogenized on centroids (cell)'
+    title = 'homogenized on centroids'
     fig.suptitle(title)
     plt.savefig(f'{title}.pdf')
     plt.show()
 
 
-def plot_hom_different_starts(darr, diff):
-    analyzer = Analyzer(darr)
+def plot_different_homogenization_centers(
+        diffusion_array: DiffusionArray,
+        builder: Homogenizer.Builder = Homogenizer.Builder().report_progress(False),
+        title: str = 'homogenization different starts'
+) -> None:
+    """
+    This method shows the effect of homogenizing on different centers. It creates 12 subplots to show the original
+    diffusion array at the start of the process, the diffusion array with the background removed, the diffusion array
+    homogenized on the detected center as well as 9 additional homogenizations each with a different homogenization
+    center.
+
+    Args:
+        diffusion_array (DiffusionArray): The diffusion array on which the homogenization should be shown.
+        builder (Homogenizer.Builder): A builder object to customize the homogenization process. By default, the
+        progress of the homogenization will not be reported.
+        title (str): The title for the plot.
+
+    Returns:
+        None
+    """
+    diffusion_array = diffusion_array.channel(0)
+    analyzer = Analyzer(diffusion_array)
+    background_removed_array = diffusion_array.background_removed()
     start_place = analyzer.detect_diffusion_start_place()
     start_frame = analyzer.detect_diffusion_start_frame()
+    diffusion_array = diffusion_array.frame(f'0:{start_frame + 1}')
 
-    darr_wo_bcg = darr.updated_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
-
-    analyzer = Analyzer(darr_wo_bcg)
-
-    fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(24, 32))
-    axes = [axs[0][0], axs[0][1]] + [axs[i][j] for i in range(1, 4) for j in range(0, 3)]
+    fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(18, 24))
 
     ax = axs[0][0]
     ax.tick_params(label1On=False, tick1On=False)
-    ax.imshow(darr.frame(start_frame + 1))
+    ax.imshow(diffusion_array.frame(start_frame))
     ax.scatter(*start_place, color='red')
 
     ax = axs[0][1]
     ax.tick_params(label1On=False, tick1On=False)
-    ax.imshow(darr_wo_bcg.frame(start_frame + 1))
-
+    ax.imshow(background_removed_array.frame(start_frame))
     ax.scatter(*start_place, color='red')
 
     ax = axs[0][2]
-    copy = darr_wo_bcg.copy()
-    size = darr_wo_bcg.channel(0).frame(0).shape[0]
-    ordered = sorted([start_place[0], start_place[1], size - start_place[0], size - start_place[1]])
-    max_distance = ceil(sqrt(ordered[-1] ** 2 + ordered[-2] ** 2))
-    for j in range(0, max_distance, diff):
-        if j % 100 == 0:
-            print(f'{j:4d}/{max_distance}')
-        ring_mask = Mask.ring(darr.shape, start_place, j, j + diff)
-        avg = analyzer.apply_for_each_frame(np.average, mask=ring_mask)
-        copy[ring_mask] = avg
-
     ax.tick_params(label1On=False, tick1On=False)
-    im_max = np.max(copy[start_frame + 1])
-    im_min = np.min(copy[start_frame + 1])
-    ax.imshow(copy[start_frame + 1], vmax=im_max, vmin=im_min)
+    homogenizer = builder.start_frame(start_frame).center_point(start_place).remove_background().build()
+    homogenized = homogenizer.homogenize(diffusion_array).frame(start_frame)
+    v_min = np.min(homogenized)
+    v_max = np.max(homogenized)
+    ax.imshow(homogenized, vmin=v_min, vmax=v_max)
     ax.scatter(*start_place, color='red')
 
-    for i in range(2, 11):
-        ax = axes[i]
+    test_points = [
+        (round(y * diffusion_array.height / 4), round(x * diffusion_array.width / 4))
+        for x in range(1, 4) for y in range(1, 4)
+    ]
 
-        copy = darr_wo_bcg.copy()
+    center_point: tuple
+    for i, center_point in enumerate(test_points):
+        homogenizer = builder.start_frame(start_frame).center_point(center_point).remove_background().build()
+        homogenized = homogenizer.homogenize(diffusion_array).frame(start_frame)
 
-        size = darr_wo_bcg.channel(0).frame(0).shape[0]  # assuming square
-        start_place = (256 * ((i - 2) % 3 + 1), 256 * ((i - 2) // 3 + 1))
-
-        ordered = sorted([start_place[0], start_place[1], size - start_place[0], size - start_place[1]])
-        max_distance = ceil(sqrt(ordered[-1] ** 2 + ordered[-2] ** 2))
-        for j in range(0, max_distance, diff):
-            if j % 100 == 0:
-                print(f'{j:4d}/{max_distance}')
-            ring_mask = Mask.ring(darr.shape, start_place, j, j + diff)
-            avg = analyzer.apply_for_each_frame(np.average, mask=ring_mask)
-            copy[ring_mask] = avg
-
+        ax = axs[i // 3 + 1][i % 3]
         ax.tick_params(label1On=False, tick1On=False)
-        ax.imshow(copy[start_frame + 1], vmax=im_max, vmin=im_min)
-        ax.scatter(*start_place, color='red')
+        ax.imshow(homogenized, vmin=v_min, vmax=v_max)
+        ax.scatter(*center_point, color='red')
 
     fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.96, bottom=0.01)
-    title = 'homogenization different starts'
     fig.suptitle(title)
-    plt.savefig(f'{title}.pdf')
-    plt.show()
-
-
-def plot_cell_hom_different_starts(darr, diff):
-    analyzer = Analyzer(darr)
-    start_place = analyzer.detect_diffusion_start_place()
-    start_frame = analyzer.detect_diffusion_start_frame()
-
-    darr_wo_bcg = darr.updated_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
-
-    analyzer = Analyzer(darr_wo_bcg)
-
-    fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(24, 32))
-    axes = [axs[0][0], axs[0][1]] + [axs[i][j] for i in range(1, 4) for j in range(0, 3)]
-
-    ax = axs[0][0]
-    ax.tick_params(label1On=False, tick1On=False)
-    ax.imshow(darr.frame(start_frame + 1))
-    ax.scatter(*start_place, color='red')
-
-    ax = axs[0][1]
-    ax.tick_params(label1On=False, tick1On=False)
-    ax.imshow(darr_wo_bcg.frame(start_frame + 1))
-
-    ax.scatter(*start_place, color='red')
-
-    ax = axs[0][2]
-    copy = darr_wo_bcg.copy()
-    size = darr_wo_bcg.channel(0).frame(0).shape[0]
-    ordered = sorted([start_place[0], start_place[1], size - start_place[0], size - start_place[1]])
-    max_distance = ceil(sqrt(ordered[-1] ** 2 + ordered[-2] ** 2))
-    cell_mask = Mask.cell(darr_wo_bcg[:], np.percentile(darr.frame(start_frame), 66)).for_frame(start_frame + 1)
-    for j in range(0, max_distance, diff):
-        if j % 100 == 0:
-            print(f'{j:4d}/{max_distance}')
-        ring_mask = Mask.ring(darr.shape, start_place, j, j + diff)
-        combined_mask = ring_mask & cell_mask
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            avg = np.nan_to_num(np.nanmean(copy[combined_mask]), nan=0).astype(int)
-            copy[ring_mask] = avg
-
-    ax.tick_params(label1On=False, tick1On=False)
-    im_max = np.max(copy[start_frame + 1])
-    im_min = np.min(copy[start_frame + 1])
-    ax.imshow(copy[start_frame + 1], )
-    ax.scatter(*start_place, color='red')
-
-    for i in range(2, 11):
-        ax = axes[i]
-
-        copy = darr_wo_bcg.copy()
-
-        size = darr_wo_bcg.channel(0).frame(0).shape[0]  # assuming square
-        start_place = (256 * ((i - 2) % 3 + 1), 256 * ((i - 2) // 3 + 1))
-
-        ordered = sorted([start_place[0], start_place[1], size - start_place[0], size - start_place[1]])
-        max_distance = ceil(sqrt(ordered[-1] ** 2 + ordered[-2] ** 2))
-        cell_mask = Mask.cell(darr_wo_bcg[:], np.percentile(darr.frame(start_frame), 66)).for_frame(start_frame + 1)
-        for j in range(0, max_distance, diff):
-            if j % 100 == 0:
-                print(f'{j:4d}/{max_distance}')
-            ring_mask = Mask.ring(darr.shape, start_place, j, j + diff)
-            combined_mask = ring_mask & cell_mask
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=RuntimeWarning)
-                avg = np.nan_to_num(np.nanmean(copy[combined_mask]), nan=0).astype(int)
-                copy[ring_mask] = avg
-
-        ax.tick_params(label1On=False, tick1On=False)
-        ax.imshow(copy[start_frame + 1], vmax=im_max, vmin=im_min)
-        ax.scatter(*start_place, color='red')
-
-    fig.subplots_adjust(wspace=0.01, left=0.01, right=0.99, top=0.96, bottom=0.01)
-    title = 'cell homogenization different starts'
-    fig.suptitle(title)
-    plt.savefig(f'{title}.pdf')
     plt.show()
 
 
@@ -385,7 +326,7 @@ def plot_start_cells(directories):
 
                 darr_wo_bcg = darr.updated_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
 
-                cut = Mask.cell(darr_wo_bcg[:], np.percentile(darr.frame(start_frame), 66))
+                cut = Mask.cutoff(darr_wo_bcg[:], np.percentile(darr.frame(start_frame), 66))
 
                 ax.tick_params(label1On=False, tick1On=False)
                 parts = filename.split("_")
@@ -456,74 +397,143 @@ def plot_inner_radi(filename):
     plt.show()
 
 
+def compose_pixelwise(diffusion_arrays: List[DiffusionArray]) -> DiffusionArray:
+    """
+    Creates a pixelwise sum of the given diffusion arrays. The diffusion arrays will be translated to have their
+    detected starting points be on the same point. The output diffusion array will have the biggest possible height and
+    width as long as this rectangle is not outside any of the individual input diffusion arrays.
+
+    Args:
+        diffusion_arrays (List[DiffusionArray]): The input diffusion arrays which are to be composed
+
+    Returns:
+        DiffusionArray: A new diffusion array created as the pixelwise sum of the translated input arrays.
+
+    """
+    left = right = top = bottom = before = after = math.inf
+
+    diffusion_arrays: List[DiffusionArray] = list(map(lambda darr: darr.channel(0), diffusion_arrays))
+
+    for diffusion_array in diffusion_arrays:
+        print(diffusion_array.meta.name, diffusion_array.shape)
+        analyzer = Analyzer(diffusion_array)
+        start_frame = analyzer.detect_diffusion_start_frame()
+        start_x, start_y = analyzer.detect_diffusion_start_place()
+        width, height = diffusion_array.frame(0).shape
+
+        left = min(left, start_x)
+        right = min(right, width - start_x)
+        top = min(top, start_y)
+        bottom = min(bottom, height - start_y)
+        before = min(before, start_frame)
+        after = min(after, diffusion_array.number_of_frames - start_frame)
+
+    aggregate = np.zeros((before + after, left + right, top + bottom), dtype=np.float32)
+
+    for diffusion_array in diffusion_arrays:
+        analyzer = Analyzer(diffusion_array)
+        start_frame = analyzer.detect_diffusion_start_frame()
+        start_x, start_y = analyzer.detect_diffusion_start_place()
+        start_x = round(start_x)
+        start_y = round(start_y)
+
+        diffusion_array = diffusion_array.resized(
+            (start_x - left, start_y - top),
+            (start_x + right, start_y + bottom)
+        )
+        diffusion_array = diffusion_array.background_removed()
+        diffusion_array = diffusion_array.normalized(0, 4048)
+        diffusion_array = diffusion_array.frame(f'{start_frame - before}:{start_frame + after}')
+
+        aggregate += diffusion_array
+
+    return DiffusionArray(path=None, ndarray=aggregate)
+
+
+def concatenate_homogenized_radii(
+        homogenized_array: DiffusionArray,
+        start_place: Tuple[int | float, int | float]
+) -> np.ndarray:
+    """
+    This method takes the intensities in the homogenized array along the longest line segment that has an end point in
+    the given start place and is parallel to the sides of the diffusion array for each frame. Then stacks those line
+    segments next to each other in a ndarray and returns it.
+
+    Args:
+          homogenized_array (DiffusionArray): A preferably homogenized diffusion_array whose line segment-wise
+          intensities are to be stacked.
+          start_place (Tuple[int | float, int | float]): The point around which the array was homogenized.
+
+    Returns:
+        np.ndarray: The line segment-wise intensities stacked next to each other in a 2D NumPy array.
+
+    """
+    homogenized_array = homogenized_array.channel(0)
+    x, y = (round(coordinate) for coordinate in start_place)
+    width = homogenized_array.width
+    height = homogenized_array.height
+
+    edge_distances = [x, y, width - x, height - y]
+    max_distance = max(edge_distances)
+
+    if x == max_distance:
+        return homogenized_array.ndarray[:, 0, y, :x].T
+
+    if y == max_distance:
+        return homogenized_array.ndarray[:, 0, :y, x].T
+
+    if width - x == max_distance:
+        return homogenized_array.ndarray[:, 0, y, x:].T
+
+    if height - y == max_distance:
+        return homogenized_array.ndarray[:, 0, y:, x].T
+
+
+def plot_concatenated_radii(array: np.ndarray) -> None:
+    """
+    Plots the 2D NumPy array created by concatenate_homogenized_radii(). Should only be used on the output of that
+    function.
+
+    Args:
+        array (np.ndarray): A 2D ndarray, the output of concatenate_homogenized_radii().
+
+    Returns:
+        None
+    """
+    plt.figure(figsize=(8, 6))
+    plt.imshow(array, aspect='auto')
+    plt.gca().invert_yaxis()
+    plt.ylabel('Distance from origin')
+    plt.xlabel('Frame')
+    plt.show()
+
+
 def main():
     # generate_homogenized_npz(directory='G:\\rost\\kozep')
     # generate_homogenized_npz(directory='G:\\rost\\Ca2+_laser')
     # generate_homogenized_npz(directory='G:\\rost\\sarok')
-    # directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
-    # filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl018.nd2'  # 17 dead w/ 50%   10 dead w/ 5%
-    # filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec007.nd2'
-    filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'  # 001 dead if inverted 60%
 
-    diff = 2
-
-    def show_r():
-        analyzer = Analyzer(DiffusionArray(filename).channel(0))
-        start_place = analyzer.detect_diffusion_start_place()
-        start_frame = analyzer.detect_diffusion_start_frame()
-        hom_file = re.sub(r'\.nd2', '_homogenized_avg.npz', filename)
-        darr = DiffusionArray(hom_file)
-        darr = darr.channel(0)
-
-        asd = darr.ndarray[:, 0, start_place[1], start_place[0]:].T
-        # asd = np.flip(asd, axis=0)
-        # plt.axis('off')
-
-        plt.figure(figsize=(8, 6))
-        plt.imshow(asd, aspect='auto')
-        plt.gca().invert_yaxis()
-        plt.ylabel('Distance from origin')
-        plt.xlabel('Frame')
-        plt.savefig(re.sub(r'\.nd2', '_homogenized_avg.png', filename))
-        # print(re.sub(r'\.nd2', '_homogenized_avg.png', filename))
-        plt.show()
-
-    show_r()
-    # plot_inner_radi(filename)
-
+    directories = ['G:\\rost\\Ca2+_laser', 'G:\\rost\\kozep', 'G:\\rost\\sarok']
     # plot_homogenized(directories)
 
-    # darr = DiffusionArray(filename).channel(0)
-    #
-    # analyzer = Analyzer(darr)
-    # start_place = analyzer.detect_diffusion_start_place()
-    # start_frame = analyzer.detect_diffusion_start_frame()
-    # darr_wo_bcg = darr.updated_ndarray(darr - np.mean(darr.frame('0:3'), axis=0))
-    # darr_wo_bcg = darr.updated_ndarray(darr_wo_bcg[start_frame: start_frame + 11])
-    # analyzer = Analyzer(darr_wo_bcg)
-    # copy = darr_wo_bcg.copy()
-    # print(darr_wo_bcg.shape)
-    #
-    # size = darr.channel(0).frame(0).shape[0]  # assuming square
-    # ordered = sorted([start_place[0], start_place[1], size - start_place[0], size - start_place[1]])
-    # max_distance = ceil(sqrt(ordered[-1] ** 2 + ordered[-2] ** 2))
-    # cell_mask = Mask.cell(darr_wo_bcg[:], np.percentile(darr.frame(start_frame), 66)).for_frame(1)
-    # for i in range(0, max_distance, diff):
-    #     if i % 100 == 0:
-    #         print(f'{filename:40s}--{i:4d}/{max_distance}')
-    #     ring_mask = Mask.ring(darr.shape, start_place, i, i + diff)
-    #     combined_mask = ring_mask & cell_mask
-    #     # combined_mask = ring_mask
-    #
-    #     with warnings.catch_warnings():
-    #         warnings.filterwarnings("ignore", category=RuntimeWarning)
-    #         avg = np.nan_to_num(np.nanmean(darr_wo_bcg[combined_mask], axis=0), nan=0).astype(int)
-    #         copy[ring_mask] = avg
-    #
-    # plt.imshow(copy[10])
-    # plt.show()
-    # plt.imshow(copy[0])
-    # plt.show()
+    filename = 'G:\\rost\\kozep\\super_1472_5_laser_EC1flow_laserabl018.nd2'
+    # filename = 'G:\\rost\\Ca2+_laser\\1133_3_laser@30sec007.nd2'
+    # filename = 'G:\\rost\\sarok\\1472_4_laser@30sec004.nd2'
+
+    composite = compose_pixelwise(DiffusionArray.get_all_from_directory('G:\\rost\\sarok', regex='.*\\.nd2'))
+
+    plot_starting_place_finder_comparisons(composite, title='Start place finders for composite')
+
+    plot_different_homogenization_centers(composite, title='Different centers of homogenization for composite')
+
+    analyzer = Analyzer(composite)
+    start_place = analyzer.detect_diffusion_start_place()
+    start_frame = analyzer.detect_diffusion_start_frame()
+    homogenizer = Homogenizer.Builder().remove_background().report_progress(False).center_point(
+        start_place).start_frame(start_frame).build()
+    homogenized = homogenizer.homogenize(composite)
+
+    plot_concatenated_radii(concatenate_homogenized_radii(homogenized, start_place))
 
 
 if __name__ == '__main__':

@@ -25,6 +25,7 @@ class Analyzer:
             int: The frame index where the diffusion process starts.
         """
 
+        # TODO first value over epsilon strategy bcs 'sarok\\...003.nd2'
         if self.diffusion_array.get_cached('diffusion_start_frame') is not None:
             return self.diffusion_array.get_cached('diffusion_start_frame')
 
