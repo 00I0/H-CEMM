@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+from matplotlib import pyplot as plt
+from matplotlib.animation import FuncAnimation, FFMpegWriter
 
 
 class Writer(ABC):
@@ -57,10 +59,38 @@ class Writer(ABC):
 class NPZWriter(Writer):
     def write(self, path: str, data: np.array):
         if not path.lower().endswith('.npz'):
-            raise ValueError("Invalid file extension. Expected '.npz'")
+            raise ValueError("Invalid file extension. Expected: '.npz'")
 
         np.savez(path, data)
 
     @staticmethod
     def supported_extension() -> str:
         return 'npz'
+
+
+class MP4Writer(Writer):
+    def write(self, path: str, data: np.array):
+        if not path.lower().endswith('.mp4'):
+            raise ValueError("Invalid file extension. Expected: '.mp4'")
+
+        if data.ndim != 3:
+            raise ValueError(f'The array must be 3 dimensional but it was: {data.ndim}')
+
+        v_min = np.min(data)
+        v_max = np.max(data)
+
+        def update(frame: int):
+            plt.clf()
+
+            plt.imshow(data[frame, ...], vmin=v_min, vmax=v_max)
+            plt.title(f'Frame: {frame}')
+
+        fig, ax = plt.subplots()
+        ani = FuncAnimation(fig, update, frames=data.shape[0], repeat=False)
+        writer = FFMpegWriter(fps=10, metadata=dict(artist='Regaisz Oliver'), bitrate=10_000)
+
+        ani.save(path, writer=writer)
+
+    @staticmethod
+    def supported_extension() -> str:
+        return 'mp4'

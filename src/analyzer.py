@@ -34,7 +34,7 @@ class Analyzer:
 
         arr = np.diff(np.max(arr, axis=(1, 2)))
 
-        ans = int(np.argmax(arr))
+        ans = round(np.argmax(arr))
         self.diffusion_array.cache(diffusion_start_frame=ans)
         return ans
 
@@ -86,10 +86,10 @@ class Analyzer:
             frame[Mask.circle(frame.shape, place, radius).flip().ndarray] = 0
 
             # centroid
-            total_intensity = np.sum(frame, dtype=np.int64)
+            total_intensity = np.sum(frame, dtype=np.float64)
             rows, cols = np.indices(frame.shape)
-            weighted_rows = np.sum(frame * rows, dtype=np.int64) / total_intensity
-            weighted_cols = np.sum(frame * cols, dtype=np.int64) / total_intensity
+            weighted_rows = np.sum(frame * rows, dtype=np.float64) / total_intensity
+            weighted_cols = np.sum(frame * cols, dtype=np.float64) / total_intensity
 
             place = (round(weighted_rows), round(weighted_cols))
             return save_and_return(place)

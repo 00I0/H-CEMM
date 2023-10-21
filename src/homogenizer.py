@@ -351,7 +351,7 @@ class Homogenizer:
 
             return self
 
-        def only_homogenize_on_cells(self, cutoff_percentile=66, compute_for_each_frame=False) -> 'Homogenizer.Builder':
+        def only_homogenize_on_cells(self, cutoff_percentile=90, compute_for_each_frame=False) -> 'Homogenizer.Builder':
             """
             This method creates an aggregating mask extractor that filters indexes in the input array based on intensity
             values. An intensity value is considered too low if it does not exceed the `cutoff_percentile`-th quantile

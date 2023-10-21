@@ -64,7 +64,6 @@ class NPZReader(Reader):
     def read(self, path: str) -> np.array:
         if not path.lower().endswith('.npz'):
             raise ValueError("Invalid file extension. Expected '.npz'")
-        a = np.load(path)
         return np.load(path)['arr_0']
 
 

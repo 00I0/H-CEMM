@@ -49,7 +49,8 @@ class DiffusionArray:
                 raise ValueError('The numpy array must contain the two spacial dimensions and the time dimension')
             self._ndarray = ndarray
 
-        self._ndarray = self.ndarray.astype(np.int32)
+        if np.issubdtype(self.ndarray.dtype, np.integer):
+            self._ndarray = self.ndarray.astype(np.int32)
 
         self._cached = {}
 
@@ -96,7 +97,7 @@ class DiffusionArray:
             ValueError: If the file extension is not supported or the data cannot be saved.
         """
         try:
-            Writer.of_type(path).write(path, self.ndarray)
+            Writer.of_type(path).write(path, self[:])
         except Exception as e:
             raise ValueError("Failed to save diffusion data to file.") from e
 
@@ -243,9 +244,9 @@ class DiffusionArray:
         """
         return self[:].shape
 
-    def resized(self, top_left: Tuple[int, int], bottom_right: Tuple[int, int]) -> 'DiffusionArray':
+    def cropped(self, top_left: Tuple[int, int], bottom_right: Tuple[int, int]) -> 'DiffusionArray':
         """
-        Crop and resize the DiffusionArray object to a new rectangular region defined by the 'top_left' and
+        Crops the DiffusionArray object to a new rectangular region defined by the 'top_left' and
         'bottom_right' corners. Please ensure that both 'top_left' and 'bottom_right' are within a valid range of the
         original arrays size and the rectangle defined by them has sides with positive lengths.
 
@@ -274,16 +275,71 @@ class DiffusionArray:
             self.ndarray[:, :, first_x: end_x, first_y: end_y]
         )
 
-    def updated_ndarray(self, ndarray: np.ndarray) -> 'DiffusionArray':
+    def resized(self, new_width: int, new_height: int) -> 'DiffusionArray':
+        """
+        Resize the DiffusionArray to a new width and height using bilinear interpolation.
+
+        This method resizes the DiffusionArray to the specified new dimensions using bilinear interpolation. Bilinear
+        interpolation is a method for estimating pixel values at non-integer coordinates by combining two linear
+        interpolations.
+
+        Args:
+            new_width (int): The new width for the resized DiffusionArray.
+            new_height (int): The new height for the resized DiffusionArray.
+
+        Returns:
+            DiffusionArray: A new DiffusionArray instance with the specified dimensions and interpolated data.
+
+        Raises:
+            ValueError: If the new_width or new_height is less than or equal to zero.
+        """
+        if new_width <= 0 or new_height <= 0:
+            raise ValueError('The new width and height must be greater than zero.')
+
+        original_width = self.width
+        original_height = self.height
+
+        width_scale = new_width / original_width
+        height_scale = new_height / original_height
+
+        y_indices = np.arange(new_height).reshape(-1, 1)
+        x_indices = np.arange(new_width)
+
+        src_x = x_indices / width_scale
+        src_y = y_indices / height_scale
+
+        # Find the four nearest pixels in the original image
+        x0 = src_x.astype(int)
+        x1 = np.minimum(x0 + 1, original_width - 1)
+        y0 = src_y.astype(int)
+        y1 = np.minimum(y0 + 1, original_height - 1)
+
+        # Calculate the weights for the four pixels
+        wx1 = src_x - x0
+        wx0 = 1 - wx1
+        wy1 = src_y - y0
+        wy0 = 1 - wy1
+
+        ndarray = self.ndarray
+        interpolated_values = (
+                wx0 * (wy0 * ndarray[:, :, y0, x0] + wy1 * ndarray[:, :, y1, x0]) +
+                wx1 * (wy0 * ndarray[:, :, y0, x1] + wy1 * ndarray[:, :, y1, x1])
+        )
+
+        return self.updated_ndarray(interpolated_values)
+
+    def updated_ndarray(self, ndarray: np.ndarray = None) -> 'DiffusionArray':
         """
         Creates a new DiffusionArray with a new ndarray.
 
         Parameters:
-            ndarray (np.ndarray): The new ndarray to update the DiffusionArray.
+            ndarray (np.ndarray): The new ndarray to update the DiffusionArray. If none self[:] will be used.
 
         Returns:
             DiffusionArray: A new DiffusionArray object with the updated ndarray.
         """
+        if ndarray is None:
+            ndarray = self[:]
         darr = DiffusionArray(path=None, ndarray=ndarray)
         darr._index_strategy = self._index_strategy
 
@@ -360,7 +416,7 @@ class DiffusionArray:
         except KeyError:
             return None
 
-    def normalized(self, new_min: int | float = 0, new_max: int | float = 1) -> 'DiffusionArray':
+    def normalized(self, new_min: int | float = 0.0, new_max: int | float = 1.0) -> 'DiffusionArray':
         """
         This method scales the values in the DiffusionArray object to be between 'new_min' and 'new_max'. Scaling is
         performed using a linear operator where the minimum value in the array becomes 'new_min' and the maximum
@@ -373,10 +429,10 @@ class DiffusionArray:
         Returns:
             DiffusionArray: A new DiffusionArray object with values scaled to the given range.
         """
-        min_value = self.ndarray.min()
-        max_value = self.ndarray.max()
+        min_value = self[:].min()
+        max_value = self[:].max()
 
-        normalized_array = new_min + (self.ndarray * (new_max - new_min) - min_value) / (max_value - min_value)
+        normalized_array = new_min + (self.ndarray - min_value) * (new_max - new_min) / (max_value - min_value)
         return self.updated_ndarray(normalized_array)
 
     def background_removed(self, background_slices: str = '0:3', aggregator: Callable = np.mean) -> 'DiffusionArray':
