@@ -1,9 +1,9 @@
 import os
 import re
 from abc import ABC, abstractmethod
+from typing import Iterator, Any, Optional, List, Callable, Tuple
 
 import numpy as np
-from typing import Iterator, Any, Optional, List, Callable, Tuple
 
 from src.file_meta import FileMeta
 from src.mask import Mask
@@ -48,6 +48,8 @@ class DiffusionArray:
             if ndarray.ndim not in (3, 4):
                 raise ValueError('The numpy array must contain the two spacial dimensions and the time dimension')
             self._ndarray = ndarray
+            if isinstance(path, FileMeta):
+                self._meta = path
 
         if np.issubdtype(self.ndarray.dtype, np.integer):
             self._ndarray = self.ndarray.astype(np.int32)
@@ -55,9 +57,27 @@ class DiffusionArray:
         self._cached = {}
 
         if self.ndarray.ndim == 3:
-            # assuming channel dimension is missing TODO: dimension generating strategy
+            # assuming channel dimension is missing
             self._ndarray = np.expand_dims(self.ndarray, axis=1)
             self._index_strategy = self._index_strategy.channel_extracted(0)
+
+    @staticmethod
+    def empty(frames: int, width: int, height: int, name: str) -> 'DiffusionArray':
+        """
+        Create a fake diffusion array, with zeros as data.
+
+        Args:
+            frames (int): The number of frames of the new DiffusionArray
+            width (int): The width of the new DiffusionArray
+            height (int): The height of the new DiffusionArray
+            name (str): Name used for the filename in FileMeta
+        Returns:
+            'DiffusionArray': A DiffusionArray with zeros as values.
+        """
+        arr = np.zeros(shape=(frames, height, width))
+        darr = DiffusionArray(path=None, ndarray=arr)
+        darr._meta = FileMeta.from_name(name)
+        return darr
 
     @staticmethod
     def get_all_from_directory(directory: str, regex: Optional[str] = '.*\\.(nd2|npz)$') -> List['DiffusionArray']:
@@ -202,7 +222,7 @@ class DiffusionArray:
         Returns:
             int: The number of frames.
         """
-        return self.ndarray.shape[0]
+        return self.ndarray.shape[0] + 1
 
     @property
     def number_of_channels(self) -> int:
@@ -435,21 +455,47 @@ class DiffusionArray:
         normalized_array = new_min + (self.ndarray - min_value) * (new_max - new_min) / (max_value - min_value)
         return self.updated_ndarray(normalized_array)
 
-    def background_removed(self, background_slices: str = '0:3', aggregator: Callable = np.mean) -> 'DiffusionArray':
+    def background_removed(self, background_slices: str | int = '0:3',
+                           aggregator: Callable = np.mean) -> 'DiffusionArray':
         """
         This method removes the background form a DiffusionArray, by subtracting an aggregated background form all
         frames. The aggregate background is constructed by applying the 'aggregator' function on the frames selected by
         'background_slices'.
 
         Args:
-            background_slices (str): A string specifying the slice range of frames to be used as background reference.
+            background_slices (str | int): A string specifying the slice range of frames to be used as background
+            reference. If only one frame is to be used as background an int could also be provided.
             By default, it is '0:3'.
             aggregator (Callable): A function to aggregate the selected frames. The default aggregator is np.mean.
 
         Returns:
             DiffusionArray: A new DiffusionArray object with the background removed.
         """
+        if isinstance(background_slices, int):
+            background_slices = f'{background_slices}:{background_slices + 1}'
         return self.updated_ndarray(self[:] - aggregator(self.frame(background_slices), axis=0))
+
+    def percentile_clipped(self, low_percent: float = 0.5, high_percent: float = 99.5) -> 'DiffusionArray':
+        """
+        This method clips the values in the DiffusionArray such that all values smaller than the low_percent-th
+        percentile will be replaced by it. And all values greater than the high_percent-th percentile will be replaced
+        by the high_percent-th percentile. Percentile calculations are along the whole array.
+
+        Args:
+            low_percent (float): Must be between 0 and 100 (both inclusive)
+            high_percent (float): Must be between 0 and 100 (both inclusive)
+
+        Returns:
+            DiffusionArray: A new DiffusionArray object with the extreme values clipped.
+        """
+        clipped_array = self[:]
+        low_thresh = np.percentile(clipped_array, q=low_percent)
+        high_thresh = np.percentile(clipped_array, q=high_percent)
+
+        clipped_array[clipped_array < low_thresh] = low_thresh
+        clipped_array[clipped_array > high_thresh] = high_thresh
+
+        return self.updated_ndarray(clipped_array)
 
 
 # index: frame, channel, x, y
@@ -536,7 +582,6 @@ class _DefaultIndexStrategy(_IndexStrategy):
         return iter(ndarray)
 
     def getitem(self, ndarray: np.ndarray, key: Any) -> Any:
-        print(type(key))
         return ndarray[key]
 
     def frame_extracted(self, frame) -> '_IndexStrategy':

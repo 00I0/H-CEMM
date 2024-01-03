@@ -1,13 +1,12 @@
 from abc import ABC, abstractmethod
 from builtins import float
+from typing import Optional, Callable
 
-import numba as nb
 import numpy as np
 from lmfit import Parameters
 from numba import njit
 from pde import PDEBase, ScalarField
 from pde.grids.boundaries.axes import BoundariesData
-from typing import Optional, Callable
 
 
 class DiffusionPDEBase(PDEBase, ABC):
@@ -18,8 +17,10 @@ class DiffusionPDEBase(PDEBase, ABC):
      to specify the PDE's behavior. The following methods should also be implemented: `_make_pde_rhs_numba` and
      `update_parameters`
 
-    Attributes:
+    Properties:
         bc (BoundariesData): The boundary conditions for the PDE.
+
+    Attributes:
         diffusivity (float): The diffusivity coefficient of the PDE.
 
     Methods:
@@ -53,8 +54,10 @@ class DiffusionPDEBase(PDEBase, ABC):
                 unaffected. Using the same generator for solving PDEs concurrently is strongly discouraged.
         """
         super().__init__(noise=noise, rng=rng)
-        self.bc = bc
+        self._bc = bc
         self.diffusivity = diffusivity
+
+        self._cached_numba_rhs = None
 
     @abstractmethod
     def evolution_rate(self, state: ScalarField, t: float = 0) -> ScalarField:
@@ -95,13 +98,13 @@ class DiffusionPDEBase(PDEBase, ABC):
         """
         raise NotImplementedError()
 
+    @abstractmethod
+    def create_parameters(self) -> Parameters:
+        raise NotImplementedError()
+
     @property
     def bc(self) -> BoundariesData:
         return self._bc
-
-    @bc.setter
-    def bc(self, value: BoundariesData):
-        self._bc = value
 
     @property
     def diffusivity(self) -> float:
@@ -130,8 +133,8 @@ class LinearDiffusivityPDE(DiffusionPDEBase):
 
     def __init__(
             self,
-            diffusivity: float = 0.2636,
-            mu: float = 0.0200,
+            diffusivity: float = 0.36532,
+            mu: float = -0.04039,
             bc: BoundariesData = 'auto_periodic_neumann',
             noise: float = 0,
             rng: Optional[np.random.Generator] = None,
@@ -188,21 +191,27 @@ class LinearDiffusivityPDE(DiffusionPDEBase):
             **kwargs: Additional keyword arguments.
 
         Returns:
-            Callable[[np.ndarray, float], np.ndarray]: A Numba-compiled function for calculating the PDE right-hand side.
+            Callable[[np.ndarray, float], np.ndarray]: A Numba-compiled function for calculating the right-hand side.
         """
         if not isinstance(state, ScalarField):
             raise ValueError('state must be a ScalarField.')
 
-        array_type = nb.typeof(state.data)
-        signature = array_type(array_type, nb.double)
-
-        diffusivity = self.diffusivity
-        mu = self.mu
         laplace_operator = state.grid.make_operator('laplace', bc=self.bc)
 
-        @njit(signature)
-        def pde_rhs(state_data: np.ndarray, t: float) -> np.ndarray:
+        @njit(cache=True)
+        def linear_diffusion(
+                state_data: np.ndarray,
+                t: float,
+                diffusivity: float,
+                mu: float,
+        ) -> np.ndarray:
             return diffusivity * laplace_operator(state_data, args={'t': t}) - mu * state_data
+
+        if self._cached_numba_rhs is None:
+            self._cached_numba_rhs = linear_diffusion
+
+        def pde_rhs(state_data: np.ndarray, t: float):
+            return self._cached_numba_rhs(state_data, t, self.diffusivity, self.mu)
 
         return pde_rhs
 
@@ -217,6 +226,12 @@ class LinearDiffusivityPDE(DiffusionPDEBase):
         for parameter in parameters.values():
             if parameter.name in parameter_names:
                 setattr(self, parameter.name, parameter.value)
+
+    def create_parameters(self) -> Parameters:
+        params = Parameters()
+        params.add('diffusivity', self.diffusivity, min=0, max=20)
+        params.add('mu', self.mu, min=-10, max=10)
+        return params
 
 
 class SigmoidDiffusivityPDE(DiffusionPDEBase):
@@ -240,9 +255,9 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
 
     def __init__(
             self,
-            diffusivity: float = 13.2528,
-            mu: float = 0.2500,
-            beta: float = 3.9847,
+            diffusivity: float = 19.99884,
+            mu: float = 0.04441,
+            beta: float = -4.59453,
             n: int = 1,
             bc: BoundariesData = 'auto_periodic_neumann',
             noise: float = 0,
@@ -293,14 +308,6 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
     def n(self, value: int):
         self._n = value
 
-    @staticmethod
-    @njit
-    def _power_sigmoid(x: float | np.ndarray[float], n: float) -> float | np.ndarray[float]:
-        """
-        Should only be used internally.
-        """
-        return 1 / (1 + np.exp(-x ** n))
-
     def evolution_rate(self, state: ScalarField, t: float = 0) -> ScalarField:
         """
         Calculate the evolution rate of the SigmoidDiffusivityPDE.
@@ -316,7 +323,7 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
             raise ValueError('state must be a ScalarField.')
 
         laplace_applied = state.laplace(bc=self.bc, label='evolution rate', args={'t': t})
-        diff_term = SigmoidDiffusivityPDE._power_sigmoid(self.beta - self.diffusivity * state.data, self.n)
+        diff_term = 1 / (1 + np.exp((self.beta - self.diffusivity * state.data) ** self.n))
         return diff_term * laplace_applied - self.mu * state
 
     def _make_pde_rhs_numba(self, state: ScalarField, **kwargs) -> Callable[[np.ndarray, float], np.ndarray]:
@@ -334,20 +341,25 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
         if not isinstance(state, ScalarField):
             raise ValueError('state must be a ScalarField.')
 
-        array_type = nb.typeof(state.data)
-        signature = array_type(array_type, nb.double)
-
-        diffusivity = self.diffusivity
-        mu = self.mu
-        beta = self.beta
-        n = self.n
         laplace_operator = state.grid.make_operator('laplace', bc=self.bc)
-        power_sigmoid = SigmoidDiffusivityPDE._power_sigmoid
 
-        @njit(signature)
-        def pde_rhs(state_data: np.ndarray, t: float) -> np.ndarray:
-            diff_term = power_sigmoid(beta - diffusivity * state_data, n)
+        @njit(cache=True)
+        def sigmoid_diffusion(
+                state_data: np.ndarray,
+                t: float,
+                beta: float,
+                diffusivity: float,
+                mu: float,
+                n: int,
+        ) -> np.ndarray:
+            diff_term = 1 / (1 + np.exp((beta - diffusivity * state_data) ** n))
             return diff_term * laplace_operator(state_data, args={'t': t}) - mu * state_data
+
+        if self._cached_numba_rhs is None:
+            self._cached_numba_rhs = sigmoid_diffusion
+
+        def pde_rhs(state_data: np.ndarray, t: float):
+            return self._cached_numba_rhs(state_data, t, self.beta, self.diffusivity, self.mu, self.n)
 
         return pde_rhs
 
@@ -362,6 +374,14 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
         for parameter in parameters.values():
             if parameter.name in parameter_names:
                 setattr(self, parameter.name, parameter.value)
+
+    def create_parameters(self) -> Parameters:
+        beta_bound = np.log((1 - 0.01) / 0.01)
+        params = Parameters()
+        params.add('diffusivity', self.diffusivity, min=-20, max=20)
+        params.add('mu', self.mu, min=-10, max=10)
+        params.add('beta', self.beta, min=-beta_bound, max=beta_bound)
+        return params
 
 
 class LogisticDiffusionPDE(DiffusionPDEBase):
@@ -458,18 +478,24 @@ class LogisticDiffusionPDE(DiffusionPDEBase):
         if not isinstance(state, ScalarField):
             raise ValueError('state must be a ScalarField.')
 
-        array_type = nb.typeof(state.data)
-        signature = array_type(array_type, nb.double)
-
-        diffusivity = self.diffusivity
-        lambda_term = self.lambda_term
-        alpha = self.alpha
         laplace_operator = state.grid.make_operator('laplace', bc=self.bc)
 
-        @njit(signature)
-        def pde_rhs(state_data: np.ndarray, t: float) -> np.ndarray:
+        @njit(cache=True)
+        def logistic_diffusion(
+                state_data: np.ndarray,
+                t: float,
+                diffusivity: float,
+                lambda_term: float,
+                alpha: float,
+        ) -> np.ndarray:
             return (diffusivity * laplace_operator(state_data, args={'t': t})
-                    + alpha * state_data * (lambda_term - state_data))
+                    + alpha * state_data * (lambda_term - state))
+
+        if self._cached_numba_rhs is None:
+            self._cached_numba_rhs = logistic_diffusion
+
+        def pde_rhs(state_data: np.ndarray, t: float):
+            return self._cached_numba_rhs(state_data, t, self.diffusivity, self.lambda_term, self.alpha)
 
         return pde_rhs
 
@@ -484,3 +510,10 @@ class LogisticDiffusionPDE(DiffusionPDEBase):
         for parameter in parameters.values():
             if parameter.name in parameter_names:
                 setattr(self, parameter.name, parameter.value)
+
+    def create_parameters(self) -> Parameters:
+        params = Parameters()
+        params.add('diffusivity', .2, min=0, max=1)
+        params.add('lambda_term', .2, min=0, max=1)
+        params.add('alpha', .2, min=0, max=1)
+        return params

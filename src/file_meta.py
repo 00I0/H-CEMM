@@ -29,6 +29,13 @@ class FileMeta:
         return FileMeta(split[-1], None, split[-2] if len(split) > 1 else '.', None)
 
     @staticmethod
+    def from_name(name):
+        """
+        Creates a FileMeta object where drive_id, folder and homogenized_id are None.
+        """
+        return FileMeta(name, None, None, None)
+
+    @staticmethod
     def _non_null_getter(getter):
         def inner(self):
             value = getter(self)

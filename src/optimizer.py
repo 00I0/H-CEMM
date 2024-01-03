@@ -50,6 +50,7 @@ class Optimizer:
         self._optimal_solution = None
         self._optimal_mse = -1
         self._optimal_parameters = None
+        self._number_of_iterations = -1
 
     @property
     def optimal_solution(self) -> np.ndarray:
@@ -68,6 +69,10 @@ class Optimizer:
         if self._optimal_parameters is None:
             raise AttributeError('The method optimize should be called first.')
         return self._optimal_parameters
+
+    @property
+    def number_of_iterations(self) -> int:
+        return self._number_of_iterations
 
     def optimize(
             self,
@@ -111,6 +116,8 @@ class Optimizer:
             mse = (resid ** 2).sum()
             nonlocal optimal_mse
 
+            self._number_of_iterations = iter_number
+
             if mse < optimal_mse:
                 optimal_mse = mse
 
@@ -143,7 +150,7 @@ class Optimizer:
             dt=0.00001
         )[:-1]
         self._optimal_parameters = optimal_params
-        self._optimal_mse = optimal_mse
+        self._optimal_mse = optimal_mse / self._expected_values.shape[1]
 
         return optimal_params  # type: ignore
 
@@ -188,10 +195,10 @@ class Optimizer:
             ax.set_ylim(y_min, y_max)
             ax.set_xlim(0, len(self._expected_values[0]))
 
-            a = 0.7
-            for j in range(i - 1, max(i - 5, 0), -1):
-                ax.plot(optimal_solution[j], color='blue', alpha=a)
-                a -= 0.2
+            a = 0.8
+            for j in range(i - 1, max(i - 6, -1), -1):
+                ax.plot(optimal_solution[j], color='grey', alpha=a)
+                a -= 0.18
 
             ax.plot(expected_frame, color='red')
             ax.plot(solution_frame, color='blue')

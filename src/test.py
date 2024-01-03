@@ -1,16 +1,20 @@
 import functools
 import inspect
+import itertools
 import math
 import os
 import re
+import time
+from dataclasses import dataclass
 from math import ceil, sqrt
 from multiprocessing import Pool
+from typing import List, Sequence, Tuple, Iterator, Optional
 
 import numpy as np
 from lmfit import Model, Parameters, create_params
 from matplotlib import pyplot as plt, gridspec, patches
 from matplotlib.axes import Axes
-from typing import List, Sequence, Tuple, Iterator
+from pde.visualization.movies import Movie
 
 from analyzer import Analyzer
 from diffusion_array import DiffusionArray
@@ -45,7 +49,7 @@ def homogenize_directory(
         select_regex: str = '.*\\.nd2',
         output_suffix: str = '_homogenized_average.npz',
         output_directory: str | None = None,
-        homogenizer_builder: Homogenizer.Builder = Homogenizer.Builder().remove_background()
+        homogenizer_builder: Homogenizer.Builder = Homogenizer.Builder()
 ) -> None:
     """
     This method creates the homogenized versions of specific files in a directory. You can specify the diffusion process
@@ -234,7 +238,7 @@ def plot_starting_place_finder_comparisons(
 
         analyzer = Analyzer(diffusion_array)
         start_frame = analyzer.detect_diffusion_start_frame()
-        ax.imshow(diffusion_array.frame(start_frame))
+        ax.imshow(diffusion_array.initial_condition(start_frame))
 
         for color, strategy in zip(colors, strategies):
             kw_dict = {}
@@ -260,7 +264,7 @@ def plot_fit(
         data: np.ndarray,
         t_start: int,
         t_max: int,
-        func: str = 'exponential_decay',
+        func: str = 'diffusion_decay',
 ):
     if data.ndim != 1:
         raise ValueError(f'data must be 1D, but it was: {data.ndim}')
@@ -302,10 +306,11 @@ def plot_fit(
     plt.axvline(x=t_start, label='Start Frame', color='green')
     y = 0.85
     for param in result.params.values():
-        plt.text(0.8 * len(data), y, f'{param.name}: {param.value:2.2f}')
+        print(f'{param.name}: {param.value:2.2f}')
+        # plt.text(0.8 * len(data), y, f'{param.name}: {param.value:2.2f}')
         y -= 0.1
 
-    plt.text(0.8 * len(data), y, f'mse: {np.average((data[fit_first_frame:] - result.best_fit) ** 2):2.2f}')
+    # plt.text(0.8 * len(data), y, f'mse: {np.average((data[fit_first_frame:] - result.best_fit) ** 2):2.2f}')
     plt.legend()
     # TODO
 
@@ -345,7 +350,11 @@ def plot_homogenized(directories):
 def plot_different_homogenization_centers(
         diffusion_array: DiffusionArray,
         darr_with_bcg: DiffusionArray,
-        builder: Homogenizer.Builder = Homogenizer.Builder().only_homogenize_on_cells().report_progress(False),
+        builder: Homogenizer.Builder = Homogenizer.Builder().report_progress(False).use_mask(functools.partial(
+            Mask.threshold_percentile_high,
+            percentile=80
+        ))
+
 ) -> None:
     """
     This method shows the effect of homogenizing on different centers. It creates 12 subplots to show the original
@@ -366,9 +375,10 @@ def plot_different_homogenization_centers(
     analyzer = Analyzer(diffusion_array)
     # background_removed_array = diffusion_array.background_removed()
     start_place = analyzer.detect_diffusion_start_place()
-    start_frame = analyzer.detect_diffusion_start_frame()
-    diffusion_array = diffusion_array.frame(f'0:{start_frame + 1}')
-    darr_with_bcg = darr_with_bcg.frame(f'0:{start_frame + 1}')
+    start_frame = analyzer.detect_diffusion_start_frame() + 1
+    diffusion_array = diffusion_array.background_removed().frame(f'0:{start_frame + 1}')
+
+    # darr_with_bcg = darr_with_bcg.frame(f'0:{start_frame + 1}')
 
     fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(18, 24))
 
@@ -436,7 +446,7 @@ def plot_start_cells(directories):
 
                 darr_wo_bcg = darr.updated_ndarray(darr[:] - np.mean(darr.frame('0:3'), axis=0))
 
-                cut = Mask.cutoff(darr_wo_bcg[:], np.percentile(darr.frame(start_frame), 66))
+                cut = Mask.threshold_percentile_high(darr, 66)
 
                 ax.tick_params(label1On=False, tick1On=False)
                 parts = filename.split("_")
@@ -707,65 +717,142 @@ def test_resizing() -> None:
     plt.show()
 
 
-def optimeze_a_single_pde(homogenized_filename):
-    start_place = Analyzer(DiffusionArray('G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec006.nd2').channel(
-        0).resized(256, 256)).detect_diffusion_start_place()
-    darr = DiffusionArray(homogenized_filename).channel(0).resized(256, 256).normalized().frame(f'{0}:{40}')
-    analyzer = Analyzer(darr)
+def optimize_a_single_pde(darr_path: str, movie: str, pde):
+    darr = DiffusionArray(darr_path).channel(0).background_removed().percentile_clipped().normalized()
+    start_place = Analyzer(darr).detect_diffusion_start_place(use_inner=True)
+    start_frame = Analyzer(darr).detect_diffusion_start_frame()
+    darr = darr.frame(f'{start_frame}:-1').updated_ndarray().frame('0:-1')
 
-    frame_of_max_intensity = np.argmax(analyzer.apply_for_each_frame(np.max, normalize=True))
-    target_frame = 40
+    homogenized_rtp = Homogenizer.Builder().start_frame(0).center_point(start_place).build().homogenize(darr)
+    frame_of_max_intensity = np.argmax(homogenized_rtp.ndarray.max(axis=1))
+    print('frame_of_max_intensity', frame_of_max_intensity)
+    homogenized_rtp = RadialTimeProfile(
+        diffusion_array=darr.frame(f'{frame_of_max_intensity}:-1'),
+        center=start_place,
+        profile_array=homogenized_rtp.ndarray[frame_of_max_intensity:, ...]
+    )
 
+    target_frame = homogenized_rtp.number_of_frames - 1
     sec_per_frame = 0.2
     frames = target_frame - frame_of_max_intensity
     t_range = frames * sec_per_frame
 
-    rtp = RadialTimeProfile(darr, start_place)
-    start_radius = rtp.frame(frame_of_max_intensity)
-    target_radius = rtp.frame(f'{frame_of_max_intensity}:{target_frame + 1}')
-
-    pde = LinearDiffusivityPDE()
-
-    i = 0
-    for i in range(len(start_radius)):
-        if start_radius[i] > start_radius[i + 1] and start_radius[i] > start_radius[i + 2]:
+    inner_radius = 3
+    for inner_radius in range(inner_radius, homogenized_rtp.width):
+        if homogenized_rtp.frame(0)[inner_radius] > homogenized_rtp.frame(0)[inner_radius + 1] and \
+                homogenized_rtp.frame(0)[inner_radius] > homogenized_rtp.frame(0)[inner_radius + 2]:
             break
 
-    ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=i)
-
-    optimizer = Optimizer(ivp, target_radius, t_range)
-
-    params = Parameters()
-    params.add('diffusivity', 0.2636, min=0, max=20)
-    # params.add('mu', 0.8, min=0.02, max=10)
-    beta_bound = np.log((1 - 0.01) / 0.01)
-    # params.add('beta', 0, min=-beta_bound, max=beta_bound)
-    opt_params = optimizer.optimize(params, max_iter=1)
-    print(opt_params)
-
-    print('-' * 20)
-    print(optimizer.optimal_parameters)
-    print(optimizer.optimal_mse)
-    print(optimizer.optimal_mse / (len(start_radius) - i))
-
-    plt.plot(start_radius)
-    plt.plot(rtp.frame(target_frame), color='red')
-    plt.plot(optimizer.optimal_solution[3], color='green')
+    print('inner_radius ', inner_radius)
+    plt.imshow(homogenized_rtp.ndarray.T, aspect='auto')
+    plt.ylim(0, homogenized_rtp.width)
     plt.show()
 
-    optimizer.plot_profile_comparisons('Ca2+_006_linear_40_prev.mp4', frame_of_max_intensity)
+    spatial_size = homogenized_rtp.width / darr.width * 10
+    print('spatial_size', spatial_size)
+
+    # for support_points in [round(homogenized_rtp.width / 2 ** i) for i in range(4, -1, -1)]:
+    for support_points in [homogenized_rtp.width // 2]:
+        print('support_points:', support_points)
+
+        resized_inner_radius = round(inner_radius * (support_points / homogenized_rtp.width))
+        resized_homogenized_rtp = homogenized_rtp.resized(support_points)
+
+        start_radius = resized_homogenized_rtp.frame(0)
+
+        ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=resized_inner_radius, spatial_size=spatial_size)
+        optimizer = Optimizer(ivp, resized_homogenized_rtp.ndarray.copy(), t_range)
+        params = pde.create_parameters()
+        opt_params = optimizer.optimize(params, max_iter=1, report_progress=True)
+
+        print(opt_params, '\n')
+
+        plt.plot(start_radius)
+        plt.plot(resized_homogenized_rtp.frame(-1), color='red')
+        plt.plot(optimizer.optimal_solution[3], color='green')
+        plt.show()
+
+        optimizer.plot_profile_comparisons(f'_hierarchy_test_ATP17_{support_points}.mp4', frame_of_max_intensity)
+
+    # <-- --- -->
+
+    # start_place = Analyzer(DiffusionArray(darr_path).channel(
+    #     0).resized(256, 256)).detect_diffusion_start_place()
+    # darr = DiffusionArray(hom_path).channel(0).resized(256, 256).normalized().frame(f'{0}:{40}')
+    # analyzer = Analyzer(darr)
+    #
+    # frame_of_max_intensity = np.argmax(analyzer.apply_for_each_frame(np.max, normalize=True))
+    # target_frame = darr.number_of_frames - 1
+    #
+    # sec_per_frame = 0.2
+    # frames = target_frame - frame_of_max_intensity
+    # t_range = frames * sec_per_frame
+    #
+    # rtp = RadialTimeProfile(darr, start_place)
+    # start_radius = rtp.frame(frame_of_max_intensity)
+    # target_radius = rtp.frame(f'{frame_of_max_intensity}:{target_frame + 1}')
+    #
+    # # pde = LinearDiffusivityPDE()
+    #
+    # i = 3
+    # for i in range(i, len(start_radius)):
+    #     if start_radius[i] > start_radius[i + 1] and start_radius[i] > start_radius[i + 2]:
+    #         break
+    #
+    # ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=i)
+    #
+    # optimizer = Optimizer(ivp, target_radius, t_range)
+    #
+    # params = pde.create_parameters()
+    #
+    # # params = Parameters()
+    # # params.add('diffusivity', 0.2636, min=0, max=20)
+    # # params.add('mu', 0.8, min=0.02, max=10)
+    # beta_bound = np.log((1 - 0.01) / 0.01)
+    # # params.add('beta', 0, min=-beta_bound, max=beta_bound)
+    # opt_params = optimizer.optimize(params, max_iter=50)
+    # print(opt_params)
+    #
+    # print('-' * 20)
+    # print(optimizer.optimal_parameters)
+    # print(optimizer.optimal_mse)
+    #
+    # plt.plot(start_radius)
+    # plt.plot(rtp.frame(target_frame), color='red')
+    # plt.plot(optimizer.optimal_solution[3], color='green')
+    # plt.show()
+    #
+    # optimizer.plot_profile_comparisons(movie, frame_of_max_intensity)
 
 
-def _async_optimize_pdes_to_files(darr_path, hom_path, pdes, target_frame):
+@dataclass
+class AsyncOptimizeResult:
+    filename: str
+    pde: type
+    optimal_params: Parameters
+    optimal_mse: float
+    number_of_iterations: int
+    optimal_solution: Optional[np.ndarray] = None
+    start_frame: Optional[int] = None
+    measured_data: Optional[np.ndarray] = None
+    inner_radius: Optional[int] = None
+
+
+def _async_optimize_pdes_to_files(darr_path, hom_path, pdes, target_frame) -> Sequence[AsyncOptimizeResult]:
+    resized = DiffusionArray(darr_path).channel(0).resized(256, 256)
     start_place = Analyzer(
-        DiffusionArray(darr_path).channel(0).resized(256, 256)
+        resized
     ).detect_diffusion_start_place()
+
+    target_frame = resized.number_of_frames - 1
+
     darr = (
         DiffusionArray(hom_path)
         .channel(0)
         .resized(256, 256)
         .normalized().frame(f'{0}:{target_frame + 1}')
         .updated_ndarray()
+        .frame('0:-1')
     )
 
     frame_of_max_intensity = np.argmax(Analyzer(darr).apply_for_each_frame(np.max, normalize=True))
@@ -778,21 +865,216 @@ def _async_optimize_pdes_to_files(darr_path, hom_path, pdes, target_frame):
     start_radius = rtp.frame(frame_of_max_intensity)
     target_radius = rtp.frame(f'{frame_of_max_intensity}:{target_frame + 1}')
 
-    i = 0
-    for i in range(len(start_radius)):
+    i = 3
+    for i in range(i, len(start_radius)):
         if start_radius[i] > start_radius[i + 1] and start_radius[i] > start_radius[i + 2]:
             break
 
+    ans = []
     for (pde, params) in pdes:
         ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=i)
 
         optimizer = Optimizer(ivp, target_radius, t_range)
-        optimizer.optimize(params, max_iter=50, report_progress=False)
+        optimizer.optimize(params, max_iter=1, report_progress=False)
 
-        print(f'{darr.meta.name}: \n'
-              f'pde: {type(pde)} \n'
-              f'{optimizer.optimal_parameters} \n'
-              f'{optimizer.optimal_mse}\n')
+        # print(f'{darr.meta.name}: \n'
+        #       f'pde: {type(pde)} \n'
+        #       f'{optimizer.optimal_parameters} \n'
+        #       f'{optimizer.optimal_mse}\n')
+        ans.append(AsyncOptimizeResult(
+            darr.meta.name,
+            type(pde),
+            optimizer.optimal_parameters,
+            optimizer.optimal_mse,
+            optimizer.number_of_iterations
+        ))
+
+    return ans
+
+
+def _async_optimize_single_pde(
+        radial_time_profile: RadialTimeProfile,
+        pde,
+        params: Parameters,
+        max_number_of_support_points=-1,
+        min_number_of_support_points=40,
+        max_number_of_iterations=50
+) -> AsyncOptimizeResult:
+    if max_number_of_support_points == -1:
+        max_number_of_support_points = radial_time_profile.width
+
+    params: Parameters = params.copy()  # type: ignore
+    frame_of_max_intensity = np.argmax(np.max(radial_time_profile.ndarray, axis=1))
+    max_intensity_frame = radial_time_profile.frame(frame_of_max_intensity)
+
+    inner_radius = np.argmin(max_intensity_frame)
+    for inner_radius in range(inner_radius, radial_time_profile.width):
+        if max_intensity_frame[inner_radius] > max_intensity_frame[inner_radius + 1] \
+                and max_intensity_frame[inner_radius] > max_intensity_frame[inner_radius + 2]:
+            break  # kinda wierd not going to lie
+
+    # value_at_inner_radius = start_frame[inner_radius]
+    # pde.bc = [BoundaryPeriodic(axis=0), ({"value": value_at_inner_radius}, {"derivative": 0})]
+
+    spatial_size = radial_time_profile.width
+
+    target_frame = radial_time_profile.number_of_frames - 1
+    sec_per_frame = 0.3
+    frames = target_frame - frame_of_max_intensity
+    t_range = frames * sec_per_frame
+
+    iters = 0
+    # for support_points in [round(radial_time_profile.width / 2 ** i) for i in range(4, -1, -1)]:
+    # for support_points in [145]:
+    for support_points in [
+        min(min_number_of_support_points * 2 ** n, max_number_of_support_points)
+        for n in range(int(np.ceil(np.log2(max_number_of_support_points / min_number_of_support_points))) + 1)
+    ]:
+        print(support_points)
+        resized_inner_radius = round(inner_radius * (support_points / radial_time_profile.width))
+        resized_rtp = radial_time_profile.resized(support_points)
+        start_radius = resized_rtp.frame(frame_of_max_intensity)
+
+        ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=resized_inner_radius, spatial_size=spatial_size)
+        optimizer = Optimizer(ivp, resized_rtp.frame(f'{frame_of_max_intensity}:-1'), t_range)
+        optimal_params = optimizer.optimize(params, max_iter=max_number_of_iterations, report_progress=False)
+        iters += optimizer.number_of_iterations
+        mse = optimizer.optimal_mse
+
+        # optimizer.plot_profile_comparisons('rtps_optimizer.mp4')
+
+    return AsyncOptimizeResult(
+        radial_time_profile.original_name,
+        type(pde),
+        optimal_params.copy(),
+        mse,
+        iters,
+        optimizer.optimal_solution.copy(),
+        frame_of_max_intensity,
+        resized_rtp.ndarray.copy(),
+        inner_radius
+    )
+
+
+def _async_convert_to_rtp(filename: str) -> RadialTimeProfile:
+    darr = DiffusionArray(filename).channel(0).background_removed().updated_ndarray()
+    analyzer = Analyzer(darr)
+    start_frame = analyzer.detect_diffusion_start_frame()
+    start_place = analyzer.detect_diffusion_start_place()
+
+    homogenized = Homogenizer.Builder().start_frame(start_frame).center_point(start_place).build().homogenize(darr)
+    return homogenized
+
+
+def opt_pdes_asynchronously():
+    files = [
+        # 'G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec006.nd2',
+        'G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec007.nd2',
+        'G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec008.nd2',
+        'G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl010.nd2',
+        'G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl017.nd2',
+        # 'G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl018.nd2',
+        # 'G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec001.nd2',
+        # 'G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec002.nd2',
+        # 'G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec003.nd2',
+        # 'G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec004.nd2',
+    ]
+
+    beta_bound = np.log((1 - 0.01) / 0.01)
+    pdes = [
+        (
+            LinearDiffusivityPDE(),
+            create_params(
+                diffusivity={'value': 0.18743974091700255, 'min': 0, 'max': 20},
+                mu={'value': 0.011501640804459257, 'min': -10, 'max': 10}
+            )
+        ),
+        (
+            SigmoidDiffusivityPDE(),
+            create_params(
+                diffusivity={'value': -4.855786951667621, 'min': -20, 'max': 20},
+                mu={'value': 0.011530224596437932, 'min': -10, 'max': 10},
+                beta={'value': 1.6014344070507356, 'min': -beta_bound, 'max': beta_bound}
+            )
+        ),
+        (
+            LogisticDiffusionPDE(),
+            create_params(
+                diffusivity={'value': 0.008352204390713602, 'min': 0, 'max': 20},
+                lambda_term={'value': 0.48699960609541937, 'min': 0, 'max': 1},
+                alpha={'value': 0.17933195245693778, 'min': 0, 'max': 1}
+            ),
+        )
+    ]
+
+    max_number_of_support_points = 631
+    colors = ['blue', 'green', 'orange', 'purple', 'gold', 'teal', 'lightgreen', 'cyan']
+    with Pool() as pool:
+        rtps: List[RadialTimeProfile] = pool.map(_async_convert_to_rtp, files)
+
+        # rtps: List[tuple] = [
+        #     (rtps[i].original_name, rtps[i].ndarray, 0, colors[i], 0, 0) for i in
+        #     range(len(rtps))
+        # ]
+        rtps: List[tuple] = [
+            (rtps[0].original_name, rtps[0].ndarray, 0, colors[0], 0, 0),
+            (rtps[1].original_name, rtps[1].ndarray, 0, colors[1], 0, 0),
+            (rtps[2].original_name, rtps[2].ndarray, 4, colors[2], 0, 0),
+            (rtps[3].original_name, rtps[3].ndarray, 4, colors[3], 0, 0),
+        ]
+
+        plot_rtps(rtps, 'rtps_atpca2.mp4')
+        exit()
+        descartes = [(x, *y) for x, y in itertools.product(rtps, pdes)]
+        sols: List[AsyncOptimizeResult] = pool.starmap(
+            functools.partial(
+                _async_optimize_single_pde,
+                max_number_of_support_points=max_number_of_support_points,
+                min_number_of_support_points=max_number_of_support_points,
+                max_number_of_iterations=1
+            ),
+            descartes
+        )
+        # sols: List[AsyncOptimizeResult] = list(map(
+        #     lambda x: functools.partial(
+        #         _async_optimize_single_pde,
+        #         max_number_of_support_points=max_number_of_support_points,
+        #         min_number_of_support_points=max_number_of_support_points,
+        #         max_number_of_iterations=1
+        #     )(*x),
+        #     descartes
+        # ))
+
+    rtps_to_plot = []
+    # sol: AsyncOptimizeResult = None
+    # sol.
+    rtps_to_plot.append(('measured', rtps[0].resized(max_number_of_support_points).ndarray, 0, 'red', 0, 0))
+    for i, sol in enumerate(sols[:]):
+        print(np.vstack(sol.optimal_solution).shape)
+        rtps_to_plot.append(
+            (str(sol.pde).strip("'<>").split('.')[-1], np.vstack(sol.optimal_solution), sol.start_frame, colors[i], 0,
+             sol.inner_radius)
+        )
+
+    plot_rtps(rtps_to_plot, f'rtps_ATP_17_pdes_neumann_{max_number_of_support_points}.mp4')
+
+    flattened_list: List[AsyncOptimizeResult] = sols
+    # print(*flattened_list, sep='\n')
+
+    print('\n\n------------------------\n')
+
+    keys = list(set([key for pde in pdes for key in pde[1].keys()]))
+    print('filename', 'pde', *keys, 'mse', 'iter', sep=', ')
+    for result in flattened_list:
+        pars = [result.optimal_params[key].value if key in result.optimal_params else '' for key in keys]
+        print(
+            result.filename.replace('_homogenized_avg.npz', ''),
+            str(result.pde).strip("'<>").split('.')[-1],
+            *pars,
+            result.optimal_mse,
+            result.number_of_iterations,
+            sep=', '
+        )
 
 
 def optimize_pdes_asynchronously():
@@ -865,10 +1147,78 @@ def optimize_pdes_asynchronously():
         )
     ]
 
-    target_frame = 36
+    target_frame = 40
 
-    with Pool(processes=4) as pool:
-        pool.starmap(functools.partial(_async_optimize_pdes_to_files, pdes=pdes, target_frame=target_frame), files[-4:])
+    with Pool(processes=8) as pool:
+        values = pool.starmap(
+            functools.partial(_async_optimize_pdes_to_files, pdes=pdes, target_frame=target_frame),
+            files
+        )
+
+    flattened_list: List[AsyncOptimizeResult] = [item for sublist in values for item in sublist]
+    print(*flattened_list, sep='\n')
+
+    print('\n\n------------------------\n')
+
+    keys = list(set([key for pde in pdes for key in pde[1].keys()]))
+    print('filename', 'pde', *keys, 'mse', 'iter', sep=', ')
+    for result in flattened_list:
+        pars = [result.optimal_params[key].value if key in result.optimal_params else '' for key in keys]
+        print(
+            result.filename.replace('_homogenized_avg.npz', ''),
+            str(result.pde).strip("'<>").split('.')[-1],
+            *pars,
+            result.optimal_mse,
+            result.number_of_iterations,
+            sep=', '
+        )
+
+
+# name, rtp, start_frame, color, numbers_of_before, offset
+def plot_rtps(rtps: List[Tuple[str, np.ndarray, int, str, int, int]], movie: str | Movie):
+    # print(rtps)
+
+    if isinstance(movie, str):
+        movie = Movie(filename=movie, dpi=100)
+
+    dpi = movie.dpi
+    fig_width, fig_height = 1280 / dpi, 720 / dpi
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.95, left=0.05, bottom=0.075)
+
+    y_min = 0
+    y_max = 1
+
+    # print(rtps)
+
+    max_number_of_frames = max(rtp.shape[0] for (name, rtp, start_frame, color, k, offset) in rtps)
+    # print(max_number_of_frames)
+    max_distance = max(rtp.shape[1] for (name, rtp, start_frame, color, k, offset) in rtps)
+
+    for frame in range(max_number_of_frames):
+        ax.clear()
+        ax.set_ylim(y_min, y_max)
+        ax.set_xlim(0, max_distance)
+        ax.set_xlabel('Distance from origin (pixel)')
+        ax.set_ylabel('Intensity')
+
+        for name, rtp, start_frame, color, k, offset in rtps:
+            if frame < start_frame or frame - start_frame > rtp.shape[0] - 1:
+                continue
+
+            a = 0.8
+            da = a / k if k != 0 else 0
+            for j in range(frame - 1, max(frame - k, -1), -1):
+                ax.plot(rtp[j], color='grey', alpha=a)
+                a -= da
+            ax.plot(rtp[frame - start_frame], color=color, label=name)
+
+        ax.set_title(f'frame: {frame:3d}')
+        ax.legend(loc='upper right')
+        movie.add_figure(fig)
+
+    movie.save()
 
 
 def main():
@@ -898,12 +1248,42 @@ def main():
 
     # -------------------------------------------------
 
-    filename = 'G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec006.nd2'
-    darr_w_bcg = DiffusionArray(filename).channel(0).normalized()
+    filename = 'G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl017.nd2'
+    homogenized_filename = 'G:\\rost\\kozep\\homogenized\\super_1472_5_laser_EC1flow_laserabl017_homogenized_avg.npz'
+    darr_w_bcg = DiffusionArray(filename).channel(0).percentile_clipped().updated_ndarray().normalized()
     analyzer = Analyzer(darr_w_bcg)
     start_frame = analyzer.detect_diffusion_start_frame()
-    darr = darr_w_bcg.background_removed(f'{start_frame - 3}:{start_frame}')
+    start_place = analyzer.detect_diffusion_start_place()
+    darr = darr_w_bcg.background_removed(start_frame - 1)
     analyzer = Analyzer(darr)
+
+    homogenizer = Homogenizer.Builder().start_frame(start_frame).center_point(start_place).build()
+    rtp = homogenizer.homogenize(darr)
+    hom = rtp.to_diffusion_array()
+
+    # plt.imshow(RadialTimeProfile(hom).ndarray.T, aspect='auto')
+    # plt.gca().invert_yaxis()
+    # plt.show()
+
+    # plt.imshow(rtp.resized(200).ndarray.T, aspect='auto')
+    # plt.gca().invert_yaxis()
+    # plt.show()
+    plt.plot(rtp.frame(start_frame + 4))
+    plt.plot(rtp.resized(200).frame(start_frame + 4))
+    plt.show()
+
+    hom.save('rtp_hom.mp4')
+
+    exit()
+    # DiffusionArray(homogenized_filename).channel(0).save(darr.meta.name + 'hom.mp4')
+
+    # print(start_frame)
+    # plt.imshow(darr_w_bcg.frame(start_frame + 1))
+    # plt.show()
+    # plt.imshow(darr_w_bcg.background_removed().frame(start_frame + 1))
+    # plt.show()
+    # plt.imshow(darr.frame(start_frame + 1))
+    # plt.show()
 
     # plot_start_neighbourhood(darr, start_frame=start_frame, thin_margins=True, show_start_place=False)
 
@@ -915,13 +1295,104 @@ def main():
     # plt.plot(percentile)
     # plt.show()
 
-    # plot_starting_place_finder_comparisons(darr)
+    plot_starting_place_finder_comparisons(darr)
 
     # sums = analyzer.apply_for_each_frame(np.sum, normalize=True)
     # plot_fit(sums, start_frame, np.argmax(sums))
 
-    plot_different_homogenization_centers(darr, darr_w_bcg)
+    # plot_different_homogenization_centers(darr, darr_w_bcg)
+
+    # optimeze_a_single_pde(filename, homogenized_filename, 'ATP_017_sigmoid_40.mp4', SigmoidDiffusivityPDE())
+    # optimeze_a_single_pde(filename, homogenized_filename, 'ATP_017_linear_40.mp4', LinearDiffusivityPDE())
+    # optimeze_a_single_pde(filename, homogenized_filename, 'ATP_017_logistic_alpha_40.mp4', LogisticDiffusionPDE())
+
+    start_place = Analyzer(darr.resized(256, 256)).detect_diffusion_start_place()
+    homogenized = DiffusionArray(homogenized_filename).channel(0).resized(256, 256).normalized().frame(f'{0}:{40}')
+    analyzer = Analyzer(homogenized)
+
+    frame_of_max_intensity = np.argmax(analyzer.apply_for_each_frame(np.max, normalize=True))
+    target_frame = homogenized.number_of_frames - 1
+
+    sec_per_frame = 0.2
+    frames = target_frame - frame_of_max_intensity
+    t_range = frames * sec_per_frame
+
+    rtp = RadialTimeProfile(homogenized, start_place)
+    start_radius = rtp.frame(frame_of_max_intensity)
+    target_radius = rtp.frame(f'{frame_of_max_intensity}:{target_frame + 1}')
+
+    pde = LogisticDiffusionPDE()
+
+    i = 3
+    for i in range(i, len(start_radius)):
+        if start_radius[i] > start_radius[i + 1] and start_radius[i] > start_radius[i + 2]:
+            break
+
+    print(i)
+
+    ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=i, movie='ATP_017_spherical_logistic.mp4')
+    ivp.solve(
+        collection_interval=t_range / (len(target_radius) - 1),
+        t_range=t_range,
+        report_progress=True,
+        dt=0.00001,
+        plot_kind='image'
+    )
 
 
 if __name__ == '__main__':
-    main()
+    # plot_starting_place_finder_comparisons()
+    filename = 'G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl018.nd2'
+    # filename = 'G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec008.nd2'
+    # filename = 'G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec004.nd2'
+
+    # movie = 'ATP_018_sigmoid'
+    # pde = LinearDiffusivityPDE()
+    # optimize_a_single_pde(filename, movie, pde)
+
+    # opt_pdes_asynchronously()
+
+    # main()
+    # comp()
+    # optimize_pdes_asynchronously()
+
+    darr = DiffusionArray(filename).channel(0).background_removed(6).resized(256, 256).normalized()
+    # start_place = Analyzer(darr.resized(256, 256)).detect_diffusion_start_place()
+    # homogenized = DiffusionArray(homogenized_filename).channel(0).resized(256, 256).normalized().frame(f'{0}:{40}')
+    analyzer = Analyzer(darr)
+
+    frame_of_max_intensity = np.argmax(analyzer.apply_for_each_frame(np.max, normalize=True))
+    target_frame = darr.number_of_frames - 1
+
+    sec_per_frame = 0.2
+    frames = target_frame - frame_of_max_intensity
+    t_range = frames * sec_per_frame
+
+    pde = LinearDiffusivityPDE(bc=[[{'value': 5}, {'derivative': 0}], 'periodic'])
+    # CartesianIVPPDESolver(pde, darr.frame(frame_of_max_intensity)[:], movie='cart_test.mp4') \
+    #     .solve(t_range=1, plot_kind='image')
+
+    start_frame = analyzer.detect_diffusion_start_frame()
+    start_place = analyzer.detect_diffusion_start_place()
+    rtp = Homogenizer.Builder().start_frame(start_frame).center_point(start_place).normalize().build().homogenize(darr)
+
+    initial_condition = rtp.frame(start_frame)
+    pde = SigmoidDiffusivityPDE(bc=['periodic', [{'value': initial_condition[0]}, {'derivative': 0}]])
+    # SymmetricIVPPDESolver(pde, initial_condition, movie='sym_cart_test.mp4') \
+    #     .solve(t_range=10, plot_kind='line')
+
+    # exit()
+    beta_bound = np.log((1 - 0.01) / 0.01)
+    start_time = time.time()
+    opt_res = _async_optimize_single_pde(
+        rtp,
+        pde,
+        params=create_params(
+            diffusivity={'value': -16.84238308213535, 'min': -20, 'max': 20},
+            mu={'value': 0.02037791980733772, 'min': -10, 'max': 10},
+            beta={'value': -4.463585476154911, 'min': -beta_bound, 'max': beta_bound}
+        ),
+        max_number_of_support_points=40
+    )
+    print(opt_res.optimal_params)
+    print(f'{time.time() - start_time:.4f} secs')

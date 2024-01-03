@@ -1,5 +1,6 @@
-import cv2
 import numpy as np
+import skimage
+from scipy import ndimage
 from scipy.ndimage import gaussian_filter
 
 from diffusion_array import DiffusionArray
@@ -16,45 +17,76 @@ class Analyzer:
     def diffusion_array(self) -> DiffusionArray:
         return self._diffusion_array
 
-    def detect_diffusion_start_frame(self) -> int:
+    def detect_diffusion_start_frame(self, strategy: str = 'adaptive') -> int:
         """
         Detects the start of the diffusion process based on the maximum differences between 2 consecutive frames.
         Assumes that the process never starts in the first 2 frames
+
+        Args:
+            strategy (str): The strategy used for detecting the diffusion start frame.
+                Options are: 'adaptive' (the default) and 'max-derivative'.
 
         Returns:
             int: The frame index where the diffusion process starts.
         """
 
-        # TODO first value over epsilon strategy bcs 'sarok\\...003.nd2'
-        if self.diffusion_array.get_cached('diffusion_start_frame') is not None:
-            return self.diffusion_array.get_cached('diffusion_start_frame')
+        ans = -1
 
-        arr = np.array(self.diffusion_array)
-        arr = arr - gaussian_filter(np.mean(self.diffusion_array.frame('0:3'), axis=0), sigma=2)
+        if strategy not in ('adaptive', 'max-derivative'):
+            raise ValueError(f'Unknown strategy: {strategy}')
 
-        arr = np.diff(np.max(arr, axis=(1, 2)))
+        if self.diffusion_array.get_cached(f'diffusion_start_frame {strategy}') is not None:
+            return self.diffusion_array.get_cached(f'diffusion_start_frame {strategy}')
 
-        ans = round(np.argmax(arr))
-        self.diffusion_array.cache(diffusion_start_frame=ans)
+        if strategy == 'adaptive':
+            arr = np.array(self.diffusion_array.normalized())
+            prev_diff = np.sum((arr[3, ...] - np.mean(arr[0:3, ...], axis=0)) ** 2)
+
+            i = 3
+            for i in range(3, arr.shape[0]):
+                diff = np.sum((arr[i, ...] - np.mean(arr[i - 3:i, ...], axis=0)) ** 2)
+                if diff > 1.15 * prev_diff:
+                    break
+                prev_diff = diff
+
+            ans = i
+
+        if strategy == 'max-derivative':
+            arr = np.array(self.diffusion_array)
+            arr = arr - gaussian_filter(np.mean(self.diffusion_array.frame('0:3'), axis=0), sigma=2)
+            arr = np.diff(np.max(arr, axis=(1, 2)))
+            ans = round(np.argmax(arr))
+
+        self.diffusion_array.cache(**{f'diffusion_start_frame {strategy}': ans})
         return ans
 
     def detect_diffusion_start_place(self, strategy: str = 'connected-components', **kwargs) -> tuple:
-        """
-        Detects the place where the diffusion process starts based on the maximum differences between 2 consecutive
-        frames. Assumes that the process never starts in the first 2 frames.
+        r"""
+        Detects the place where the diffusion process starts. You can specify different strategies for the detection.
+        The returned indices are in the form of (x, y).
 
         Args:
-            strategy (str): The strategy used for detecting the diffusion start place. Options are 'connected-components',
-                            'weighted-centroid', and 'biggest-difference'. Default is 'connected-components'.
+            strategy (str): The strategy used for detecting the diffusion start place. Options are:
+
+                *  'connected-components' (default): After thresholding finds the largest connected component end and
+                returns its center. An additional kwarg (use_inner) could specify whether to use the centroid of the
+                largest connected component or the centroid of the largest connected component within the largest
+                component.
+
+                *  'weighted-centroid': Calculates the average of the (i, j) indices weighted by their intensity.
+
+                *  'biggest-difference': Returns the indices of the biggest difference between the start-frame and
+                the previous frame.
+
             **kwargs: Additional keyword arguments.
                 use_inner (bool): Specifies whether to use the inner region for the 'connected-components' strategy.
                                   Default is False.
 
         Returns:
-            tuple: The coordinates (row, column) of the place where the diffusion process starts.
+            tuple: The indices (x, y) of the place where the diffusion process starts.
 
-        Raises:
-            ValueError: If the strategy is not one of 'connected-components', 'weighted-centroid', or 'biggest-difference'.
+        Raises: ValueError: If the strategy is not one of 'connected-components', 'weighted-centroid',
+            or 'biggest-difference'.
         """
 
         use_inner = kwargs.get('use_inner', False)
@@ -65,87 +97,74 @@ class Analyzer:
         if self.diffusion_array.get_cached(f'diffusion_start_place {strategy}_use_inner') is not None and use_inner:
             return self.diffusion_array.get_cached(f'diffusion_start_place {strategy}_use_inner')
 
-        def save_and_return(place, strategy=strategy):
-            kwargs_dict = {f'diffusion_start_place {strategy}': place}
+        def save_and_return(_place, _strategy=strategy):
+            kwargs_dict = {f'diffusion_start_place {_strategy}': _place}
             self.diffusion_array.cache(**kwargs_dict)
-            return round(place[0]), round(place[1])
+            return _place
 
         start_frame_number = self.detect_diffusion_start_frame()
-        frame = self.diffusion_array.frame(start_frame_number + 1)
-        frame = frame - np.mean(self.diffusion_array.frame(slice(start_frame_number - 1, start_frame_number + 1)),
-                                axis=0)
-
-        place = np.unravel_index(np.argmax(np.abs(frame)), frame.shape)
+        image = self.diffusion_array.background_removed(start_frame_number)
+        image = image.frame(start_frame_number + 1)[:]
+        biggest_difference_place = np.unravel_index(np.argmax(np.abs(image)), image.shape)
 
         if strategy == 'biggest-difference':
-            return save_and_return((place[1], place[0]))
+            return save_and_return(biggest_difference_place[::-1])
 
         if strategy == 'weighted-centroid':
-            frame[frame < 0] = 0
-            radius = int(((frame.shape[0] * frame.shape[1]) ** (1 / 2)) / 3)
-            frame[Mask.circle(frame.shape, place, radius).flip().ndarray] = 0
+            image[image < 0] = 0
+            radius = int(((image.shape[0] * image.shape[1]) ** (1 / 2)) / 3)
+            image[Mask.circle(image.shape, biggest_difference_place, radius).flip().ndarray] = 0
 
             # centroid
-            total_intensity = np.sum(frame, dtype=np.float64)
-            rows, cols = np.indices(frame.shape)
-            weighted_rows = np.sum(frame * rows, dtype=np.float64) / total_intensity
-            weighted_cols = np.sum(frame * cols, dtype=np.float64) / total_intensity
+            total_intensity = np.sum(image, dtype=np.float64)
+            rows, cols = np.indices(image.shape)
+            weighted_rows = np.sum(image * rows, dtype=np.float64) / total_intensity
+            weighted_cols = np.sum(image * cols, dtype=np.float64) / total_intensity
 
-            place = (round(weighted_rows), round(weighted_cols))
-            return save_and_return(place)
+            weighted_centroid_place = (weighted_cols, weighted_rows)
+            return save_and_return(weighted_centroid_place)
 
         if strategy == 'connected-components':
-            med = np.percentile(frame.flatten(), 67)
-            frame_copy = frame.copy()
-
-            frame[frame < med] = med - 1
-            frame[frame >= med] = 255
-            frame[frame == med - 1] = 0
-
-            image_uint8 = frame.astype(np.uint8)
-
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            image_uint8 = cv2.morphologyEx(image_uint8, cv2.MORPH_OPEN, kernel)
-
-            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(image_uint8, 4)
-            largest_label = np.argmax(stats[1:, cv2.CC_STAT_AREA]) + 1
-            center_x, center_y = centroids[largest_label]
+            smooth = skimage.filters.gaussian(image, sigma=1.5)
+            thresh_value = np.percentile(smooth, 80)
+            thresh = smooth > thresh_value
+            morphed = skimage.morphology.closing(
+                skimage.morphology.opening(thresh),
+                footprint=np.ones((3, 3))
+            )
+            labels = skimage.measure.label(morphed, connectivity=2)
+            largest_cc = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
 
             if not use_inner:
-                return save_and_return((center_x, center_y))
+                centroid = skimage.measure.regionprops(largest_cc.astype(np.uint8))[0].centroid[::-1]
+                return save_and_return(centroid)
 
-            med = np.percentile(frame_copy.flatten(), 45)
-            frame_copy[frame_copy < med] = med - 1
-            frame_copy[frame_copy >= med] = 255
-            frame_copy[frame_copy == med - 1] = 0
-            image_uint8 = frame_copy.astype(np.uint8)
-            image_uint8 = cv2.morphologyEx(image_uint8, cv2.MORPH_OPEN, kernel)
-            image_uint8 = 255 - image_uint8
-            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(image_uint8, 4)
-            distances = np.sqrt((centroids[:, 0] - center_x) ** 2 + (centroids[:, 1] - center_y) ** 2)
-            closest_label = np.argmin(distances)
-            closest_x, closest_y = centroids[closest_label]
-
-            strategy = strategy + '_use_inner'
-            return save_and_return((closest_x, closest_y), strategy=strategy)
+            inverted = 1 - morphed
+            inverted = inverted * ndimage.binary_fill_holes(largest_cc)
+            inner_labels = skimage.measure.label(inverted, connectivity=2)
+            largest_inner_cc = inner_labels == np.argmax(np.bincount(inner_labels.flat)[1:]) + 1
+            centroid = skimage.measure.regionprops(largest_inner_cc.astype(np.uint8))[0].centroid[::-1]
+            return save_and_return(centroid, strategy + '_use_inner')
 
         raise ValueError(f"Unknown strategy ({strategy}). It must be either 'connected-components', 'weighted-centroid'"
                          f" or 'biggest-difference'.")
 
-    def apply_for_each_frame(self, function: callable,
-                             remove_background: bool = False,
-                             normalize: bool = False,
-                             use_gaussian_blur: bool = False,
-                             mask: Mask | None = None) -> np.ndarray:
+    def apply_for_each_frame(
+            self,
+            function: callable,
+            remove_background: bool = False,
+            normalize: bool = False,
+            mask: Mask | None = None
+    ) -> np.ndarray:
         """
         Applies a function to each frame of the diffusion array. The function must take a frame (2D ndarray) as it's
         parameter and return a single number. After applying the function it collects the outputs in an array.
 
         Args:
             function (callable): The function to apply to each frame.
-            remove_background (bool, optional): If True, removes the background by subtracting the average of the first three frames. Default is False.
+            remove_background (bool, optional): If True, removes the background by subtracting the average of the first
+                three frames. Default is False.
             normalize (bool, optional): If True, normalizes the result to the range [0, 1]. Default is False.
-            use_gaussian_blur (bool, optional): If True, will use gaussian blur for the background removal.
             If remove background is False gaussian blur will not be used. Default is False.
             mask (np.ndarray | None, optional): A mask to apply to the diffusion array. Default is None.
 
@@ -155,12 +174,7 @@ class Analyzer:
         """
         arr = self.diffusion_array
         if remove_background:
-            mean = np.mean(self.diffusion_array.frame('0:3'), axis=0)
-            if use_gaussian_blur:
-                difference = arr - gaussian_filter(mean, sigma=2)
-            else:
-                difference = arr - mean
-            arr = arr.updated_ndarray(difference)
+            arr = arr.background_removed()
 
         if mask is not None:
             applied = function(arr[mask], axis=1)

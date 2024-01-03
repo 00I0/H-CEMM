@@ -1,5 +1,6 @@
-import numpy as np
 from typing import Tuple
+
+import numpy as np
 
 
 class Mask:
@@ -208,7 +209,10 @@ class Mask:
         return Mask(np.ndarray(ring_masks))
 
     @staticmethod
-    def bottom_right_quarter(shape: Tuple[int, ...] | np.ndarray, point: tuple) -> 'Mask':
+    def bottom_right_quarter(
+            shape: Tuple[int, ...] | np.ndarray,
+            point: tuple
+    ) -> 'Mask':
         """
         Creates a mask for the bottom-right quarter of the specified shape starting from the given point.
 
@@ -234,44 +238,125 @@ class Mask:
         return Mask(ndarray)
 
     @staticmethod
-    def cutoff(diffusion_array: np.ndarray, cutoff_by_frame: np.ndarray | float | int) -> 'Mask':
+    def threshold_percentile_low(
+            diffusion_array: np.ndarray,
+            percentile: float,
+            by_frame: bool = True
+    ) -> 'Mask':
         """
-        Generates a mask by thresholding the diffusion array based on cutoff values for each frame. The mask is useful
-        for findig cells or isolating very bright 'star-like' points. Intensities greater or equal to the cutoff value
-        will be set to 1 (or true) otherwise they will be set to 0 (false).
-
-        The diffusion array must be a 2D or 3D NumPy array or a DiffusionArray with the appropriate index strategy.
-
-        cutoff_by_frame should be a 1D NumPy array whose length must be equal to diffusion_array.shape[0]. It should
-        contain a cutoff value for each frame. If only a scalar value is provided a new NumPy array will be crated with
-        the appropriate shape and be filled with the value.
+        Creates a Mask by thresholding the diffusion array with a cutoff value calculated as the given percentile of the
+        entire array or just one frame of it depending on the `by_frame` flag. Values smaller than the cutoff value will
+        become true.
 
         Args:
-            diffusion_array (np.ndarray | DiffusionArray): the DiffusionArray as a np.ndarray
-            cutoff_by_frame (np.ndarray | float | int): The cutoff values for each frame.
+            diffusion_array (np.ndarray): A 3D array representing the diffusion data.
+            percentile (float): The value used as q in the percentile calculations. Must be: 0 <= percentile <= 100.
+            by_frame (bool): If true, calculates the threshold independently for each frame, uses the same threshold for
+                each frame otherwise.
+
         Returns:
-            np.ndarray: The cell mask as a boolean array.
+            Mask: The mask obtained form: diffusion_array <= cutoff_value
         """
+        if diffusion_array.ndim != 3:
+            raise ValueError(f'`diffusion_array` should be 3D, but it was: {diffusion_array.ndim}')
+        if not 0 <= percentile <= 100:
+            raise ValueError(f'`percentile` should be between 0 and 100, but it was: {percentile:.2f}')
 
-        if isinstance(cutoff_by_frame, (int, float)):
-            cutoff_by_frame = np.full(diffusion_array.shape[0], cutoff_by_frame)
+        if by_frame:
+            cutoff_by_frame = np.percentile(diffusion_array, q=percentile, axis=(1, 2))
+            masks = [subarray <= cutoff for subarray, cutoff in zip(diffusion_array, cutoff_by_frame)]
+            mask = np.array(masks, dtype=bool)
+            return Mask(mask)
 
-        if diffusion_array.ndim not in (2, 3):
-            raise ValueError(f'diffusion_array must be 2D or 3D, but was: {diffusion_array.ndim}')
+        cutoff = np.percentile(diffusion_array, q=percentile)
+        mask = np.array(diffusion_array) > cutoff
+        return Mask(mask)
 
-        if cutoff_by_frame.ndim != 1:
-            raise ValueError(f'cutoff_by_frame must be 1D, but was: {cutoff_by_frame.ndim}')
+    @staticmethod
+    def threshold_percentile_high(
+            diffusion_array: np.ndarray,
+            percentile: float,
+            by_frame: bool = True
+    ) -> 'Mask':
+        """
+        Creates a Mask by thresholding the diffusion array with a cutoff value calculated as the given percentile of the
+        entire array or just one frame of it depending on the `by_frame flag`. Values greater than the cutoff value will
+        become true.
 
-        if diffusion_array.shape[0] != len(cutoff_by_frame):
-            raise ValueError(f'diffusion_array and cutoff_by_frame have the same number of frames')
+        Args:
+            diffusion_array (np.ndarray): A 3D array representing the diffusion data.
+            percentile (float): The value used as q in the percentile calculations. Must be: 0 <= percentile <= 100.
+            by_frame (bool): If true, calculates the threshold independently for each frame, uses the same threshold for
+                each frame otherwise.
 
-        # if isinstance(diffusion_array, DiffusionArray):
-        #     diffusion_array = diffusion_array[:]
+        Returns:
+            Mask: The mask obtained form: diffusion_array > cutoff_value
+        """
+        return Mask.threshold_percentile_low(diffusion_array, percentile, by_frame).flip()
 
-        mask = np.zeros(shape=diffusion_array.shape)
-        if diffusion_array.ndim == 3:
-            mask[diffusion_array >= cutoff_by_frame[:, np.newaxis, np.newaxis]] = 1
-        elif diffusion_array.ndim == 2:
-            mask[diffusion_array >= cutoff_by_frame[0]] = 1
+    @staticmethod
+    def range_threshold_percentile(
+            diffusion_array: np.ndarray,
+            percentile_low: float,
+            percentile_high: float,
+            by_frame: bool = True
+    ) -> 'Mask':
+        """
+        Creates a Mask by thresholding the diffusion array with a cutoff values calculated as the given percentiles of
+        the entire array or just one frame of it depending on the `by_frame flag`. Values between the cutoff_low and
+        cutoff_high will be true.
 
-        return Mask(mask.astype(bool))
+        Args:
+            diffusion_array (np.ndarray): A 3D array representing the diffusion data.
+            percentile_low (float): The value used as q in the percentile calculations for cutoff_low.
+                Must be: 0 <= percentile <= 100.
+            percentile_high (float): The value used as q in the percentile calculations for cutoff_high.
+                Must be: 0 <= percentile <= 100.
+            by_frame (bool): If true, calculates the threshold independently for each frame, uses the same threshold for
+                each frame otherwise.
+
+        Returns:
+            Mask: The mask obtained form: cutoff_low < diffusion_array <= cutoff_high.
+        """
+        return (
+                Mask.threshold_percentile_high(diffusion_array, percentile_low, by_frame) &
+                Mask.threshold_percentile_low(diffusion_array, percentile_high, by_frame)
+        )
+
+    @staticmethod
+    def ones(
+            shape: Tuple[int, ...],
+    ) -> 'Mask':
+        """
+        Creates a musk in a given shape with only True values.
+
+        Args:
+            shape (Tuple[int, ...]): The shape of the new mask.
+
+        Returns:
+            Mask: A mask with only True values as entries.
+        """
+        if len(shape) not in (2, 3):
+            raise ValueError(f'`shape` must be 2 or 3D, but it was: {len(shape)}')
+
+        mask = np.ones(shape, dtype=bool)
+        return Mask(mask)
+
+    @staticmethod
+    def zeros(
+            shape: Tuple[int, ...],
+    ) -> 'Mask':
+        """
+        Creates a musk in a given shape with only False values.
+
+        Args:
+            shape (Tuple[int, ...]): The shape of the new mask.
+
+        Returns:
+            Mask: A mask with only False values as entries.
+        """
+        if len(shape) not in (2, 3):
+            raise ValueError(f'`shape` must be 2 or 3D, but it was: {len(shape)}')
+
+        mask = np.zeros(shape, dtype=bool)
+        return Mask(mask)

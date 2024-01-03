@@ -1,11 +1,11 @@
-import warnings
+import functools
+from typing import Callable, Tuple
 
 import numpy as np
-from typing import Callable, NewType, Tuple, Optional
 
-from src.analyzer import Analyzer
 from src.diffusion_array import DiffusionArray
 from src.mask import Mask
+from src.radial_time_profile import RadialTimeProfile
 
 
 class Homogenizer:
@@ -18,32 +18,6 @@ class Homogenizer:
     To create an instance of the `Homogenizer` class, it is recommended to use the nested class `Homogenizer.Builder` to
     ensure that all required fields are provided.
 
-    Attributes:
-        _center_point (Tuple[float | int, ...]): The point around which homogenization is conducted.
-
-        _start_frame (int) The first frame of the diffusion process, useful in creating certain types of Masks
-
-        _aggregating_mask_extractor (Optional[_MaskExtractor]): A mask used in the computation for
-        the homogenized value. This mask allows the exclusion of specific indexes (for example those whose value deemed
-        too high) during computation. If not provided, no values will be excluded.
-
-        _homogenizing_mask_extractor (_MaskExtractor): A mask used to select indexes of a concentric ring. The selected
-        indexes values will change during an iteration the homogenization process.
-
-        _background_removing_function (Callable[[DiffusionArray], DiffusionArray]): A function used for background
-        removal. Background removal is applied if `is_removing_background` is set to True.
-
-        _delta_r (int): The difference between the inner and outer radii of a ring.
-
-        _is_silent (bool): Whether to print the progress of the homogenization. Progress is indicated by printing the
-        current iteration counter every 100 iterations.
-
-
-        _is_removing_background (bool): Whether to remove background during homogenization.
-
-        _is_normalizing (bool): Whether to normalize the array to [0, 1) after homogenization. Normalization is applied
-        after background removal (if both should be applied).
-
     Methods:
         homogenize(diffusion_array: DiffusionArray) -> DiffusionArray:
             Conducts the homogenization process on the given DiffusionArray based on the provided parameters and
@@ -53,49 +27,33 @@ class Homogenizer:
     Example usage:
     \n
 
-    homogenizer = Homogenizer.Builder().center_point(start_place)start_frame(start_frame).build() \n
+    homogenizer = Homogenizer.Builder().center_point(start_place).start_frame(start_frame).build() \n
     homogenized = homogenizer.homogenize(diffusion_array)
 
     """
-    _MaskExtractor = NewType('MaskExtractor', Callable[
-        [
-            DiffusionArray,  # DiffusionArray
-            Tuple[float | int, ...],  # center
-            int,  # first frame
-            int | float,  # inner radius
-            int | float,  # outer radius
-        ],
-        Mask
-    ])
 
     def __init__(
             self,
-            center_point: Tuple[float | int, ...],
+            center_point: Tuple[int | float, int | float],
             start_frame: int,
-            aggregating_mask_extractor: Optional[_MaskExtractor],
-            homogenizing_mask_extractor: _MaskExtractor,
-            aggregating_function: Callable[[DiffusionArray | np.ndarray], float],
-            background_removing_function: Callable[[DiffusionArray], DiffusionArray],
+            mask_extractor: Callable[[np.ndarray | DiffusionArray], Mask],
             delta_r: int,
             is_silent: bool,
-            is_removing_background: bool,
             is_normalizing: bool,
+            aggregating_function: Callable[[DiffusionArray | np.ndarray], float],
     ):
         """
-        Constructor **should not be invoked directly**; use the Builder pattern instead.
+        The constructor **should not be invoked directly**; use the Builder pattern instead.
         """
         self._center_point = center_point
         self._start_frame = start_frame
-        self._aggregating_mask_extractor = aggregating_mask_extractor
-        self._homogenizing_mask_extractor = homogenizing_mask_extractor
+        self._mask_extractor = mask_extractor
         self._aggregating_function = aggregating_function
-        self._background_removing_function = background_removing_function
         self._delta_r = delta_r
         self._is_silent = is_silent
-        self._is_removing_background = is_removing_background
         self._is_normalizing = is_normalizing
 
-    def homogenize(self, diffusion_array: DiffusionArray) -> DiffusionArray:
+    def homogenize(self, diffusion_array: DiffusionArray) -> RadialTimeProfile:
         """
         Creates a homogenized version of the given DiffusionArray based on the parameters provided at construction.
         The DiffusionArray will not be changed, instead a new DiffusionArray will be created.
@@ -106,44 +64,50 @@ class Homogenizer:
         Returns:
             DiffusionArray: The homogenized version of the input array as a new DiffusionArray object.
         """
-        # TODO  add support to only homogenize one frame
-        if self._is_removing_background:
-            diffusion_array = self._background_removing_function(diffusion_array)
+
+        mask = self._mask_extractor(diffusion_array).ndarray
+        if mask.ndim == 2:
+            mask = np.tile(mask[np.newaxis, ...], (diffusion_array.number_of_frames, 1, 1))
+
+        if mask.shape != diffusion_array.shape:
+            raise ValueError(f'The mask and the diffusion array must have the same shape.')
+
+        center_x, center_y = tuple(map(round, self._center_point))
+        width = diffusion_array.width
+        height = diffusion_array.height
+
+        xs, ys = np.meshgrid(np.arange(width), np.arange(height))
+        xs -= center_x
+        ys -= center_y
+        distances = np.hypot(xs, ys)
+
+        max_distance = int(np.ceil(np.max(distances)) * 0.95)
+        data_array = diffusion_array[:].copy()
+        intensities_by_distance = np.zeros((diffusion_array.number_of_frames - 1, max_distance))
+
+        for i in range(0, max_distance, self._delta_r):
+            distances_i_delta_r_ = (i <= distances) & (distances < i + self._delta_r)
+            masked_data = (data_array * mask)[:, distances_i_delta_r_]
+            intensities_by_distance[:, i] = self._aggregating_function(masked_data)
+
+            if not self._is_silent and i % 100 == 0:
+                print(f'Homogenizing... step: {i:4d} of {max_distance:4d}')
+
+        intensities_by_distance = np.nan_to_num(intensities_by_distance, nan=0)
+
+        min_value = np.min(intensities_by_distance)
+        max_value = np.max(intensities_by_distance)
 
         if self._is_normalizing:
-            diffusion_array = diffusion_array.normalized()
-
-        center = self._center_point
-        center_x, center_y = center
-        aggregator = Analyzer(diffusion_array)
-        homogenized = diffusion_array.copy()
-
-        width = max(center_x, diffusion_array.width - center_x)
-        height = max(center_y, diffusion_array.height - center_y)
-        diagonal = int(np.ceil(np.sqrt(height ** 2 + width ** 2)))
-
-        if self._aggregating_mask_extractor is not None:
-            aggregating_mask = self._aggregating_mask_extractor(diffusion_array, center, self._start_frame, 0, 0)
+            normalized_arr = (intensities_by_distance - min_value) / (max_value - min_value)
         else:
-            aggregating_mask = None
+            normalized_arr = intensities_by_distance
 
-        for i in range(0, diagonal, self._delta_r):
-            if i % 100 == 0 and not self._is_silent:
-                print(f'Homogenizing {diffusion_array.meta.name}, {i:4d} - {diagonal:4d}')
-
-            homogenizing_mask = self._homogenizing_mask_extractor(diffusion_array, center, self._start_frame, i,
-                                                                  i + self._delta_r)
-            with warnings.catch_warnings():
-                warnings.filterwarnings('ignore')
-
-                aggregate = aggregator.apply_for_each_frame(
-                    self._aggregating_function,
-                    mask=homogenizing_mask & aggregating_mask
-                )
-                aggregate = np.nan_to_num(aggregate, nan=0)
-                homogenized[homogenizing_mask] = aggregate
-
-        return homogenized
+        return RadialTimeProfile(
+            diffusion_array=diffusion_array,
+            center=self._center_point,
+            profile_array=normalized_arr
+        )
 
     class Builder:
         """
@@ -156,16 +120,11 @@ class Homogenizer:
             All attributes of the `Homogenizer` class are available for customization through the builder.
             The following attributes have default values, making them optional:
 
-            _aggregating_mask_extractor (Homogenizer._MaskExtractor): Default is None.
-            _homogenizing_mask_extractor (Homogenizer._MaskExtractor): Default is Mask.ring.
-            _delta_r (int): Default is 2.
-            _silent (bool): Default is False.
-            _is_removing_background (bool): Default is False
-            _is_normalizing (bool): Default is False.
+            _mask_extractor (Optional[Callable[[np.ndarray | DiffusionArray], Mask]]): Default is None.
             _aggregating_function (Callable[[DiffusionArray | np.ndarray], float]): Default is np.mean.
-            _background_removing_function (Callable[[DiffusionArray], DiffusionArray]): Default is
-            DiffusionArray.background_removed.
-
+            _delta_r (int): Default is 1.
+            _is_silent (bool): Default is True.
+            _is_normalizing (bool): Default is False.
 
             The following attributes don't have default values, thus it is necessary to provide them:
 
@@ -181,58 +140,14 @@ class Homogenizer:
         def __init__(self):
             self._center = None  # this must be provided
             self._start_frame = None  # this must be provided
-            self._aggregating_mask_extractor: Homogenizer._MaskExtractor = None
-            self._homogenizing_mask_extractor: Homogenizer._MaskExtractor = None
-            self._delta_r: int = 2
-            self._silent: bool = False
-            self._is_removing_background: bool = False
+            self._mask_extractor: Callable[[np.ndarray | DiffusionArray], Mask] = lambda darr: Mask.ones(darr.shape)
+            self._delta_r: int = 1
+            self._is_silent: bool = True
             self._is_normalizing: bool = False
-            self._aggregating_function: Callable[[DiffusionArray | np.ndarray], float] = np.mean
-            self._background_removing_function: Callable[[DiffusionArray], DiffusionArray] = lambda diffusion_array: (
-                diffusion_array.background_removed()
+            self._aggregating_function: Callable[[DiffusionArray | np.ndarray], float] = functools.partial(
+                np.median,
+                axis=1,
             )
-
-            self.homogenize_on_rings()
-
-        def homogenize_on_rings(self) -> 'Homogenizer.Builder':
-            """
-            Changes the homogenizing_mask to be concentric rings.
-
-            Returns:
-                self
-            """
-
-            def ring_mask_extractor(diffusion_array, center, _, inner_radius, outer_radius):
-                return Mask.ring(diffusion_array, center, inner_radius, outer_radius)
-
-            self._homogenizing_mask_extractor = ring_mask_extractor
-            return self
-
-        def report_progress(self, is_reporting: bool = True) -> 'Homogenizer.Builder':
-            """
-            Specifies if the progress report should be printed during homogenization.
-
-            Args:
-                is_reporting (bool): whether to print the homogenization progress.
-
-            Returns:
-                self
-            """
-            self._silent = not is_reporting
-            return self
-
-        def with_delta_r(self, delta_r: int) -> 'Homogenizer.Builder':
-            """
-            Changes the difference between the inner and outer radii of the annuli.
-
-            Args:
-                delta_r (int). The new difference.
-
-            Returns:
-                self
-            """
-            self._delta_r = delta_r
-            return self
 
         def center_point(self, center: Tuple[int, int]) -> 'Homogenizer.Builder':
             """
@@ -261,27 +176,76 @@ class Homogenizer:
             self._start_frame = start_frame
             return self
 
-        def remove_background(self,
-                              is_removing_background: bool = True,
-                              removing_function: Callable[[DiffusionArray], DiffusionArray] = None
-                              ) -> 'Homogenizer.Builder':
+        def with_delta_r(self, delta_r: int) -> 'Homogenizer.Builder':
             """
-            Configures the background removal options. If a removing function is provided the boolean flag indicating
-            background removal would be set to True. The default removing function is without arguments the
-            DiffusionArray.background_removed() function
+            Changes the difference between the inner and outer radii of the annuli.
 
             Args:
-                is_removing_background (bool, optional): Whether to enable background removal.
-                removing_function (Callable[[DiffusionArray], DiffusionArray], optional): The new background remover
-                function.
+                delta_r (int). The new difference Must be greater than 0.
 
             Returns:
                 self
             """
-            self._is_removing_background = is_removing_background
-            if removing_function is not None:
-                self._background_removing_function = removing_function
-                self._is_removing_background = True
+            if delta_r <= 0:
+                raise ValueError('`delta_r` must be positive.')
+
+            self._delta_r = delta_r
+            return self
+
+        def use_mask(self, mask_extractor: Callable[[np.ndarray | DiffusionArray], Mask]) -> 'Homogenizer.Builder':
+            """
+            During homogenization only values where the mask is True will be used. If another mask was previously
+            provided or only_homogenize_on_high_intensities were called their effect is disregarded as only the
+            mask provided in this method call will be used.
+
+            Args:
+                mask_extractor (Mask) : The mask to be used.
+
+            Returns:
+                self
+            """
+            self._mask_extractor = mask_extractor
+            return self
+
+        def only_homogenize_on_high_intensities(
+                self,
+                cutoff_percentile: float = 90,
+                compute_for_each_frame: bool = False
+        ) -> 'Homogenizer.Builder':
+            """
+            This method creates a mask that filters indexes in the input array based on intensity values during the
+            homogenization. An intensity value is considered too low if it does not exceed the `cutoff_percentile`-th
+            quantile of the intensity distribution.
+
+            If another mask was previously provided or only_homogenize_on_high_intensities were called their effect is
+            disregarded as only the mask created in this method call will be used.
+
+            Args:
+                cutoff_percentile (float): The percentile value (0 to 100) used as the threshold for low intensities.
+                compute_for_each_frame (bool): Whether to compute the intensity distribution for each frame
+                    individually.
+
+            Returns:
+                self
+            """
+            self._mask_extractor = functools.partial(
+                Mask.threshold_percentile_high,
+                cutoff_percentile=cutoff_percentile,
+                compute_for_each_frame=compute_for_each_frame
+            )
+            return self
+
+        def report_progress(self, is_reporting: bool = True) -> 'Homogenizer.Builder':
+            """
+            Specifies if the progress report should be printed during homogenization.
+
+            Args:
+                is_reporting (bool): whether to print the homogenization progress.
+
+            Returns:
+                self
+            """
+            self._is_silent = not is_reporting
             return self
 
         def normalize(self, is_normalizing: bool = True) -> 'Homogenizer.Builder':
@@ -295,113 +259,6 @@ class Homogenizer:
                 self
             """
             self._is_normalizing = is_normalizing
-            return self
-
-        def filter_out_high_intensities(self, cutoff_percentile: float = 98,
-                                        compute_for_each_frame: bool = False) -> 'Homogenizer.Builder':
-            """
-            This method creates an aggregating mask extractor that filters indexes in the input array based on intensity
-            values. An intensity value is considered too high if it exceeds the `cutoff_percentile`-th quantile of the
-            intensity distribution. The cutoff percentile determines the threshold for high intensity values.
-
-            If `compute_for_each_frame` is set to True, the intensity distribution is computed separately for each
-            frame, and indexes are filtered based on their intensity in each frame.
-            If False, only the intensity values from the first frame are used as a reference, and indexes with the same
-            x, y coordinates would be filtered out for the other frames.
-
-            If another aggregating mask extractor is already applied only indexes selected by both masks would be used
-            for aggregation.
-
-            Args:
-                cutoff_percentile (float): The percentile value (0 to 100) used as the threshold for high intensities.
-                compute_for_each_frame (bool): Whether to compute the intensity distribution for each frame
-                individually.
-
-            Returns:
-                self
-            """
-
-            def star_mask_extractor_same_for_frames(diffusion_array, *_):
-                return Mask.cutoff(
-                    diffusion_array.frame(0),
-                    np.percentile(diffusion_array.frame(0), cutoff_percentile)
-                ).flip()
-
-            def star_mask_extractor_different_for_frames(diffusion_array, *_):
-                return Mask.cutoff(
-                    diffusion_array,
-                    np.percentile(
-                        np.percentile(diffusion_array, cutoff_percentile, axis=2),
-                        cutoff_percentile,
-                        axis=1
-                    )
-                ).flip()
-
-            if compute_for_each_frame:
-                star_mask_extractor = star_mask_extractor_different_for_frames
-            else:
-                star_mask_extractor = star_mask_extractor_same_for_frames
-
-            if self._aggregating_mask_extractor is None:
-                self._aggregating_mask_extractor = star_mask_extractor
-            else:
-                self._aggregating_mask_extractor = lambda *args: (
-                        self._aggregating_mask_extractor(*args) & star_mask_extractor(*args)
-                )
-
-            return self
-
-        def only_homogenize_on_cells(self, cutoff_percentile=90, compute_for_each_frame=False) -> 'Homogenizer.Builder':
-            """
-            This method creates an aggregating mask extractor that filters indexes in the input array based on intensity
-            values. An intensity value is considered too low if it does not exceed the `cutoff_percentile`-th quantile
-            of the intensity distribution.
-
-            If `compute_for_each_frame` is set to True, the intensity distribution is computed separately for each
-            frame, and indexes are filtered based on their intensity in each frame.
-            If False, only the intensity values from the first frame are used as a reference, and indexes with the same
-            x, y coordinates would be filtered out for the other frames.
-
-            If another aggregating mask extractor is already applied only indexes selected by both masks would be used
-            for aggregation.
-
-            Args:
-                cutoff_percentile (float): The percentile value (0 to 100) used as the threshold for low intensities.
-                compute_for_each_frame (bool): Whether to compute the intensity distribution for each frame
-                individually.
-
-            Returns:
-                self
-            """
-
-            def cell_mask_extractor_same_for_frames(diffusion_array, _, first_frame, *__):
-                return Mask.cutoff(
-                    diffusion_array,
-                    np.percentile(diffusion_array.frame(first_frame), cutoff_percentile)
-                ).for_frame(first_frame + 1)
-
-            def cell_mask_extractor_different_for_frames(diffusion_array, *_):
-                return Mask.cutoff(
-                    diffusion_array,
-                    np.percentile(
-                        np.percentile(diffusion_array, cutoff_percentile, axis=2),
-                        cutoff_percentile,
-                        axis=1
-                    )
-                )
-
-            if compute_for_each_frame:
-                cell_mask_extractor = cell_mask_extractor_same_for_frames
-            else:
-                cell_mask_extractor = cell_mask_extractor_different_for_frames
-
-            if self._aggregating_mask_extractor is None:
-                self._aggregating_mask_extractor = cell_mask_extractor
-            else:
-                self._aggregating_mask_extractor = lambda *args: (
-                        self._aggregating_mask_extractor(*args) & cell_mask_extractor(*args)
-                )
-
             return self
 
         def aggregating_function(self, function: Callable) -> 'Homogenizer.Builder':
@@ -433,14 +290,11 @@ class Homogenizer:
                 raise ValueError('The start frame of the diffusion process must be provided.')
 
             return Homogenizer(
-                self._center,
-                self._start_frame,
-                self._aggregating_mask_extractor,
-                self._homogenizing_mask_extractor,
-                self._aggregating_function,
-                self._background_removing_function,
-                self._delta_r,
-                self._silent,
-                self._is_removing_background,
-                self._is_normalizing
+                center_point=self._center,
+                start_frame=self._start_frame,
+                mask_extractor=self._mask_extractor,
+                aggregating_function=self._aggregating_function,
+                delta_r=self._delta_r,
+                is_silent=self._is_silent,
+                is_normalizing=self._is_normalizing,
             )
