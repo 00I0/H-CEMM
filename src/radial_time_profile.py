@@ -213,7 +213,8 @@ class RadialTimeProfile:
             spline = scipy.interpolate.make_interp_spline(
                 x=x_range_old,
                 y=y_old[i, :],
-                k=degree
+                k=degree,
+                bc_type='natural' if degree == 3 else None
             )
             new_profile_array[i, :] = spline(x_range_new)
 
@@ -250,9 +251,10 @@ class RadialTimeProfile:
 
         for i in range(self.ndarray.shape[0]):
             spline = scipy.interpolate.make_interp_spline(
-                x=x_range,
-                y=values_by_distance[i, :],
-                k=degree
+                x=np.hstack([x_range, x_range[-1] * 20]),
+                y=np.hstack([values_by_distance[i, :], values_by_distance[i, -1] * 20]),
+                k=degree,
+                bc_type='natural' if degree == 3 else None
             )
             darr_data[i, :] = spline(distances.flatten()).reshape(darr_data.shape[1:])
 

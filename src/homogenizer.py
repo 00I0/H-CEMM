@@ -82,12 +82,12 @@ class Homogenizer:
         distances = np.hypot(xs, ys)
 
         max_distance = int(np.ceil(np.max(distances)) * 0.95)
-        data_array = diffusion_array[:].copy()
+        masked_data_array = diffusion_array[:].copy() * mask
         intensities_by_distance = np.zeros((diffusion_array.number_of_frames - 1, max_distance))
 
         for i in range(0, max_distance, self._delta_r):
             distances_i_delta_r_ = (i <= distances) & (distances < i + self._delta_r)
-            masked_data = (data_array * mask)[:, distances_i_delta_r_]
+            masked_data = masked_data_array[:, distances_i_delta_r_]
             intensities_by_distance[:, i] = self._aggregating_function(masked_data)
 
             if not self._is_silent and i % 100 == 0:

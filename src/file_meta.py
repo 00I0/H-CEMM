@@ -4,14 +4,14 @@ import os.path
 class FileMeta:
     """
     Represents metadata for a file. Contains information about the files name, its Google Drive id, the parent folder
-    and the Google Drive id of the homogenized version of itself
+    and an alias for the filename.
     """
 
-    def __init__(self, name: str, drive_id: str, folder: str, homogenized_id: str):
+    def __init__(self, name: str, drive_id: str, folder: str, alias: str):
         self._name = name
         self._drive_id = drive_id
         self._folder = folder
-        self._homogenized_id = homogenized_id
+        self._alias = alias
 
     @staticmethod
     def from_path(path: str) -> 'FileMeta':
@@ -63,8 +63,8 @@ class FileMeta:
 
     @property
     @_non_null_getter
-    def homogenized(self) -> str:
-        return self._homogenized_id
+    def alias(self) -> str:
+        return self._alias
 
     @property
     @_non_null_getter

@@ -1,0 +1,74 @@
+:root {
+    --light-gary-color: #ececed;
+    --green-color: #5ab23c;
+    --red-color: #d94b4b;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --light-gary-color: #666666;
+        --green-color: #007f00;
+        --red-color: #7f0000;
+    }
+}
+
+.step, .step button {
+    border-radius: 5px;
+}
+
+.step {
+    margin: 10px;
+    padding: 5px;
+}
+
+.delete-btn {
+    background-color: var(--red-color);
+    height: 50px;
+}
+
+.navigation-btn {
+    background-color: var(--green-color);
+    width: 100px;
+}
+
+.step:last-child .navigation-btn:last-child {
+    background-color: var(--light-gary-color);
+    cursor: default;
+}
+
+.step:first-child .navigation-btn:first-child {
+    background-color: var(--light-gary-color);
+    cursor: default;
+}
+
+.tooltip-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-color: var(--light-gary-color);
+}
+
+.tooltip-label {
+    font-size: xx-large;
+    font-style: italic;
+    font-weight: bolder;
+    font-family: serif;
+}
+
+.numeric-input input {
+    width: 5em !important;
+    border-style: solid;
+}
+
+.numeric-input {
+    display: inline-block;
+    width: fit-content;
+}
+
+.numeric-input + .widget-dropdown {
+    width: 200px !important;
+}

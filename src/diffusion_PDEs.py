@@ -106,6 +106,15 @@ class DiffusionPDEBase(PDEBase, ABC):
     def bc(self) -> BoundariesData:
         return self._bc
 
+    @bc.setter
+    def bc(self, bc: BoundariesData) -> None:
+        """
+        A setter for boundary conditions.
+
+        Please be cautious changing the boundary conditions after rhs has been numba compiled, will have no effect.
+        """
+        self._bc = bc
+
     @property
     def diffusivity(self) -> float:
         return self._diffusivity

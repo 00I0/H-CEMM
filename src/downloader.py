@@ -60,9 +60,9 @@ class Downloader:
 
         file_id = self.config[file_name]['drive-id']
         folder = self.config[file_name]['folder']
-        homogenized_id = self.config[file_name]['homogenized-id']
+        alias = self.config[file_name]['alias']
 
-        return FileMeta(file_name, file_id, folder, homogenized_id)
+        return FileMeta(file_name, file_id, folder, alias)
 
     def list_file_names(self) -> list[str]:
         """

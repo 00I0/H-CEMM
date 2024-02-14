@@ -73,7 +73,7 @@ class Analyzer:
                 largest connected component or the centroid of the largest connected component within the largest
                 component.
 
-                *  'weighted-centroid': Calculates the average of the (i, j) indices weighted by their intensity.
+                *  'weighted-centroid': Calculates the average of the (x, y) indices weighted by their intensity.
 
                 *  'biggest-difference': Returns the indices of the biggest difference between the start-frame and
                 the previous frame.
