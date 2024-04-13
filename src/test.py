@@ -4,7 +4,6 @@ import itertools
 import math
 import os
 import re
-import time
 from dataclasses import dataclass
 from math import ceil, sqrt
 from multiprocessing import Pool
@@ -21,9 +20,9 @@ from diffusion_array import DiffusionArray
 from reader import ND2Reader
 from src.diffusion_PDEs import LogisticDiffusionPDE, LinearDiffusivityPDE, SigmoidDiffusivityPDE
 from src.homogenizer import Homogenizer
+from src.ivp_solver import SymmetricIVPSolver
 from src.mask import Mask
 from src.optimizer import Optimizer
-from src.pde_solver import SymmetricIVPPDESolver
 from src.radial_time_profile import RadialTimeProfile
 
 
@@ -184,7 +183,13 @@ def plot_starting_place_finder_comparisons(
                 'connected-components (use_inner: False)',
                 'weighted-centroid'
         ),
-        length: int | None = None
+        length: int | None = None,
+        legend=(
+                'legnagyobb különbség',
+                'összefüggő komponensek (belső)',
+                'összefüggő komponensek (külső)',
+                'súlyozott centroid'
+        )
 ) -> None:
     """
     This method creates a plot to show the difference between the different start place finder algorithms of the
@@ -209,7 +214,8 @@ def plot_starting_place_finder_comparisons(
     if isinstance(diffusion_arrays, DiffusionArray):
         diffusion_arrays = [diffusion_arrays]
 
-    colors = ['orange', 'black', 'purple', 'red', 'pink', 'brown', 'cyan', 'magenta', 'yellow', 'lime', 'silver']
+    colors = ['orange', 'blue', 'green', 'red', 'purple', 'pink', 'brown', 'cyan', 'magenta', 'yellow', 'lime',
+              'black']
 
     # TODO analyzer.detect_diffusion_start_place(strategy='connected-components', use_inner=True)
 
@@ -238,7 +244,7 @@ def plot_starting_place_finder_comparisons(
 
         analyzer = Analyzer(diffusion_array)
         start_frame = analyzer.detect_diffusion_start_frame()
-        ax.imshow(diffusion_array.initial_condition(start_frame))
+        ax.imshow(diffusion_array.frame(start_frame), vmin=0, vmax=1)
 
         for color, strategy in zip(colors, strategies):
             kw_dict = {}
@@ -252,7 +258,7 @@ def plot_starting_place_finder_comparisons(
     fig.subplots_adjust(wspace=0.01)
     fig.legend(
         [patches.Circle((0, 0), radius=0.2, facecolor=c) for c in colors[:len(strategies)]],
-        strategies,
+        legend,
         loc='lower right',
         fontsize='large'
     )
@@ -488,7 +494,7 @@ def plot_inner_radi(filename):
         ax.add_artist(inner_circle)
         ax.add_artist(outer_circle)
 
-        ax.legend([f'inner radius = {inner_radius}', f'outer radius = {outer_radius}'], handlelength=0)
+        ax.label([f'inner radius = {inner_radius}', f'outer radius = {outer_radius}'], handlelength=0)
         ax.set_title(f'start frame + {i}')
         ax.tick_params(label1On=False, tick1On=False)
 
@@ -504,7 +510,7 @@ def plot_inner_radi(filename):
     axs[1, 0].plot(inner_radii, color='red')
     axs[1, 0].plot(outer_radii, color='purple')
 
-    axs[1, 0].legend([f'inner radii', f'outer radius'], handlelength=0)
+    axs[1, 0].label([f'inner radii', f'outer radius'], handlelength=0)
 
     axs[1, 1].remove()
     axs[1, 2].remove()
@@ -760,7 +766,7 @@ def optimize_a_single_pde(darr_path: str, movie: str, pde):
 
         start_radius = resized_homogenized_rtp.frame(0)
 
-        ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=resized_inner_radius, spatial_size=spatial_size)
+        ivp = SymmetricIVPSolver(pde, start_radius, inner_radius=resized_inner_radius, spatial_size=spatial_size)
         optimizer = Optimizer(ivp, resized_homogenized_rtp.ndarray.copy(), t_range)
         params = pde.create_parameters()
         opt_params = optimizer.optimize(params, max_iter=1, report_progress=True)
@@ -872,7 +878,7 @@ def _async_optimize_pdes_to_files(darr_path, hom_path, pdes, target_frame) -> Se
 
     ans = []
     for (pde, params) in pdes:
-        ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=i)
+        ivp = SymmetricIVPSolver(pde, start_radius, inner_radius=i)
 
         optimizer = Optimizer(ivp, target_radius, t_range)
         optimizer.optimize(params, max_iter=1, report_progress=False)
@@ -935,7 +941,7 @@ def _async_optimize_single_pde(
         resized_rtp = radial_time_profile.resized(support_points)
         start_radius = resized_rtp.frame(frame_of_max_intensity)
 
-        ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=resized_inner_radius, spatial_size=spatial_size)
+        ivp = SymmetricIVPSolver(pde, start_radius, inner_radius=resized_inner_radius, spatial_size=spatial_size)
         optimizer = Optimizer(ivp, resized_rtp.frame(f'{frame_of_max_intensity}:-1'), t_range)
         optimal_params = optimizer.optimize(params, max_iter=max_number_of_iterations, report_progress=False)
         iters += optimizer.number_of_iterations
@@ -1215,7 +1221,7 @@ def plot_rtps(rtps: List[Tuple[str, np.ndarray, int, str, int, int]], movie: str
             ax.plot(rtp[frame - start_frame], color=color, label=name)
 
         ax.set_title(f'frame: {frame:3d}')
-        ax.legend(loc='upper right')
+        ax.label(loc='upper right')
         movie.add_figure(fig)
 
     movie.save()
@@ -1248,19 +1254,26 @@ def main():
 
     # -------------------------------------------------
 
-    filename = 'G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl017.nd2'
-    homogenized_filename = 'G:\\rost\\kozep\\homogenized\\super_1472_5_laser_EC1flow_laserabl017_homogenized_avg.npz'
+    filename = 'G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl018.nd2'
     darr_w_bcg = DiffusionArray(filename).channel(0).percentile_clipped().updated_ndarray().normalized()
+
     analyzer = Analyzer(darr_w_bcg)
     start_frame = analyzer.detect_diffusion_start_frame()
-    start_place = analyzer.detect_diffusion_start_place()
-    darr = darr_w_bcg.background_removed(start_frame - 1)
-    analyzer = Analyzer(darr)
+    plt.figure(figsize=(6, 6))
+    plt.imshow(darr_w_bcg.frame(start_frame + 1), vmin=0, vmax=1)
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+    # start_place = analyzer.detect_diffusion_start_place(use_inner=True)
+    # exit()
+    darr = darr_w_bcg.background_removed(f'{start_frame - 3}:{start_frame}')
+    # analyzer = Analyzer(darr)
 
-    homogenizer = Homogenizer.Builder().start_frame(start_frame).center_point(start_place).build()
-    rtp = homogenizer.homogenize(darr)
-    hom = rtp.to_diffusion_array()
+    # homogenizer = Homogenizer.Builder().start_frame(start_frame).center_point(start_place).build()
+    # rtp = homogenizer.homogenize(darr)
+    # hom = rtp.to_diffusion_array()
 
+    plot_starting_place_finder_comparisons(darr)
     # plt.imshow(RadialTimeProfile(hom).ndarray.T, aspect='auto')
     # plt.gca().invert_yaxis()
     # plt.show()
@@ -1268,11 +1281,11 @@ def main():
     # plt.imshow(rtp.resized(200).ndarray.T, aspect='auto')
     # plt.gca().invert_yaxis()
     # plt.show()
-    plt.plot(rtp.frame(start_frame + 4))
-    plt.plot(rtp.resized(200).frame(start_frame + 4))
-    plt.show()
+    # plt.plot(rtp.frame(start_frame + 4))
+    # plt.plot(rtp.resized(200).frame(start_frame + 4))
+    # plt.show()
 
-    hom.save('rtp_hom.mp4')
+    # hom.save('rtp_hom.mp4')
 
     exit()
     # DiffusionArray(homogenized_filename).channel(0).save(darr.meta.name + 'hom.mp4')
@@ -1294,8 +1307,6 @@ def main():
     # plt.ylabel('intensity')
     # plt.plot(percentile)
     # plt.show()
-
-    plot_starting_place_finder_comparisons(darr)
 
     # sums = analyzer.apply_for_each_frame(np.sum, normalize=True)
     # plot_fit(sums, start_frame, np.argmax(sums))
@@ -1330,7 +1341,7 @@ def main():
 
     print(i)
 
-    ivp = SymmetricIVPPDESolver(pde, start_radius, inner_radius=i, movie='ATP_017_spherical_logistic.mp4')
+    ivp = SymmetricIVPSolver(pde, start_radius, inner_radius=i, movie='ATP_017_spherical_logistic.mp4')
     ivp.solve(
         collection_interval=t_range / (len(target_radius) - 1),
         t_range=t_range,
@@ -1341,7 +1352,9 @@ def main():
 
 
 if __name__ == '__main__':
-    # plot_starting_place_finder_comparisons()
+    main()
+    exit()
+
     filename = 'G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl018.nd2'
     # filename = 'G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec008.nd2'
     # filename = 'G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec004.nd2'

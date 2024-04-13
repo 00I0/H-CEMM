@@ -1,6 +1,6 @@
 import sys
 from abc import abstractmethod
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 import ipywidgets as widgets
 import numpy as np
@@ -20,7 +20,7 @@ class PipeLineWidget(widgets.Output):
         _steps (List[_StepWidget]): List of step widgets in the pipeline.
     """
 
-    def __init__(self, darr: DiffusionArray, apply_callback=None, **kwargs):
+    def __init__(self, darr: Optional[DiffusionArray], apply_callback=None, display_mode=True, **kwargs):
         """
         Initializes the PipelineWidget.
 
@@ -31,11 +31,13 @@ class PipeLineWidget(widgets.Output):
         super().__init__(**kwargs)
 
         self._darr = darr
+        self._display_mode = display_mode
 
         with open('step_widget.css', 'r') as file:
             css_content = file.read()
         style_html = f'<style>{css_content}</style>'
-        display(widgets.HTML(style_html))
+        if display_mode:
+            display(widgets.HTML(style_html))
 
         logic_widgets_by_name = {
             logic_widget_cls.name(): logic_widget_cls for logic_widget_cls in _LogicWidgetBase.__subclasses__()
@@ -67,6 +69,9 @@ class PipeLineWidget(widgets.Output):
         """
         Clears and updates the widget view.
         """
+        if not self._display_mode:
+            return
+
         self.clear_output(wait=True)
 
         with self:

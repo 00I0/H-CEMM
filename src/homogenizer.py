@@ -88,7 +88,9 @@ class Homogenizer:
         for i in range(0, max_distance, self._delta_r):
             distances_i_delta_r_ = (i <= distances) & (distances < i + self._delta_r)
             masked_data = masked_data_array[:, distances_i_delta_r_]
-            intensities_by_distance[:, i] = self._aggregating_function(masked_data)
+            aggregated_data = self._aggregating_function(masked_data)
+            for j in range(i, min(max_distance, i + self._delta_r)):
+                intensities_by_distance[:, j] = aggregated_data
 
             if not self._is_silent and i % 100 == 0:
                 print(f'Homogenizing... step: {i:4d} of {max_distance:4d}')

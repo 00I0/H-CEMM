@@ -1,115 +1,161 @@
 import math
+import time
+from abc import ABC, abstractmethod
+from typing import Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 from lmfit import Parameters, Minimizer
-from pde.visualization.movies import Movie
 
-from src.pde_solver import SymmetricIVPPDESolver
+from ivbcp import SymmetricIVBCPBase
+from src.ivp_solver import SymmetricIVPSolver
 
 
-class Optimizer:
+class OptimizerBase(ABC):
     """
-    A class for numerically optimizing the parameters of diffusion partial differential equations (PDEs).
+    Base class for optimizers of symmetric initial value boundary condition problems (IVPBCs).
 
-    This class is designed to find the optimal parameters for PDEs to fit expected diffusion profiles.
+    This abstract base class defines the common properties and methods for optimizers of symmetric IVPBCs.
+    Subclasses should implement the `optimize` method to provide specific optimization algorithms.
 
-    Methods:
-        optimize(parameters, max_iter, tol, report_progress, method):
-            Optimize the PDE parameters to fit the expected values.
-        plot_profile_comparisons(movie, frame_offset, optimal_solution):
-            Plot comparisons between expected and optimized profiles.
+    Args:
+        ivp (SymmetricIVBCPBase): The symmetric IVPBC to be optimized.
 
     Properties:
-        optimal_solution (np.ndarray): Property to get the optimized diffusion profiles.
-        optimal_mse (float): Property to get the mean squared error of the optimization.
-        optimal_parameters (Parameters): Property to get the optimized parameters.
+        optimal_solution (np.ndarray): The optimal solution obtained after optimization.
+        optimal_mse (float): The optimal mean squared error achieved during optimization.
+        optimal_rsqrd (float): The optimal R-squared value achieved during optimization.
+        optimal_parameters (Parameters): The optimal parameters obtained during optimization.
+        number_of_iterations (int): The number of iterations performed during optimization.
+        time_required (int): The time required for optimization, in seconds.
+        stats (list): A list of dictionaries containing optimization statistics for each resolution.
     """
 
     def __init__(
             self,
-            pde_solver: SymmetricIVPPDESolver,
-            expected_values: np.ndarray,
-            t_range: float
+            ivp: SymmetricIVBCPBase
     ):
-        """
-        Initialize an Optimizer.
+        self._ivp_solver = SymmetricIVPSolver(ivp)
+        self._ivp = ivp
 
-        Args:
-            pde_solver (SymmetricIVPPDESolver): A solver for symmetric initial value problems.
-            expected_values (np.ndarray): The expected diffusion profiles as a 2d np.ndarray with (time, x) indices.
-            t_range (float): The time range for the simulation.
-        """
-        if expected_values.ndim != 2:
-            raise ValueError(f'expected_values must be 2d, but it was: {expected_values.ndim}')
-
-        self._pde_solver = pde_solver
-        self._expected_values = expected_values
-        self._t_range = t_range
-
-        self._optimal_solution = None
-        self._optimal_mse = -1
-        self._optimal_parameters = None
-        self._number_of_iterations = -1
+        self._optimal_solution: Optional[np.ndarray] = None
+        self._optimal_mse: float = -1
+        self._optimal_rsqrd: Optional[float] = None
+        self._optimal_parameters: Optional[Parameters] = None
+        self._number_of_iterations: int = -1
+        self._time_required: int = -1
+        self._message = ''
+        self._stats = []
 
     @property
     def optimal_solution(self) -> np.ndarray:
         if self._optimal_solution is None:
-            raise AttributeError('The method optimize should be called first.')
+            raise AttributeError('The method `optimize` should be called first.')
         return self._optimal_solution
 
     @property
     def optimal_mse(self) -> float:
         if self._optimal_mse < 0:
-            raise AttributeError('The method optimize should be called first.')
+            raise AttributeError('The method `optimize` should be called first.')
         return self._optimal_mse
+
+    @property
+    def optimal_rsqrd(self) -> float:
+        if self._optimal_rsqrd is None:
+            raise AttributeError('The method `optimize` should be called first.')
+        return self._optimal_rsqrd
+
+    @property
+    def stats(self) -> list:
+        """
+        A list of dictionaries containing optimization statistics for each resolution.
+
+        Returns:
+            list: A list of dictionaries containing optimization
+        """
+        return self._stats
 
     @property
     def optimal_parameters(self) -> Parameters:
         if self._optimal_parameters is None:
-            raise AttributeError('The method optimize should be called first.')
+            raise AttributeError('The method `optimize` should be called first.')
         return self._optimal_parameters
 
     @property
     def number_of_iterations(self) -> int:
+        if self._number_of_iterations < 0:
+            raise AttributeError('The method `optimize` should be called first.')
         return self._number_of_iterations
+
+    @property
+    def time_required(self) -> int:
+        if self._time_required < 0:
+            raise AttributeError('The method `optimize` should be called first.')
+        return self._time_required
+
+    @abstractmethod
+    def optimize(
+            self,
+            parameters: Parameters,
+            max_iter: int = 1_000,
+            tol: float = 1e-4,
+            report_progress: bool = False,
+            method: str | None = 'SLSQP',
+            dt: float = 1e-4,
+    ):
+        """
+        Optimize the specified parameters of the IVBCP using optimization settings.
+
+        Args:
+            parameters (Parameters): The initial parameters for the optimization.
+            max_iter (int): The maximum number of iterations for the optimization (default: 1000).
+            tol (float): The tolerance for the optimization (default: 1e-4).
+            report_progress (bool): Whether to report the progress during optimization (default: False).
+            method (str | None): The optimization method to use (default: 'SLSQP').
+            dt (float): The time step for the numerical solver (default: 1e-4).
+
+        Raises:
+            NotImplementedError: This is an abstract method and must be implemented by subclasses.
+        """
+        raise NotImplementedError
+
+
+class StaticMeshResolutionOptimizer(OptimizerBase):
+    """
+    Optimizer for symmetric IVPBCs with a static mesh resolution.
+
+    This class implements the `optimize` method from the `OptimizerBase` class and performs optimization of the
+    IVBCP parameters for a fixed mesh resolution.
+
+    """
 
     def optimize(
             self,
             parameters: Parameters,
             max_iter: int = 1_000,
             tol: float = 1e-4,
-            report_progress: bool = True,
-            method: str | None = 'SLSQP'
+            report_progress: bool = False,
+            method: str | None = 'SLSQP',
+            dt: float = 1e-4,
+            scheme: str = 'rk45'
     ) -> Parameters:
-        """
-        Optimize the PDE parameters to fit the expected diffusion profiles.
-
-        Args:
-            parameters (Parameters): Initial parameters for the optimization.
-            max_iter (int): Maximum number of iterations for optimization.
-            tol (float): Tolerance for optimization termination.
-            report_progress (bool): Whether to report progress during optimization.
-            method (str | None): Optimization method (e.g., 'SLSQP', 'leastsq', 'Powell').
-
-        Returns:
-            Parameters: The optimized parameters.
-        """
-        expected_values = self._expected_values[:, self._pde_solver.inner_radius:]
+        start_time = time.time()
+        expected_values = self._ivp.expected_values
+        t_range = self._ivp.frames * self._ivp.sec_per_frame
 
         def target_function(params: Parameters):
-            self._pde_solver.pde.update_parameters(params)
+            self._ivp_solver.pde.parameters = params
 
-            sol = self._pde_solver.solve(
-                collection_interval=self._t_range / (len(expected_values) - 1),
-                t_range=self._t_range,
+            sol = self._ivp_solver.solve(
+                collection_interval=t_range / (len(expected_values) - 1),
+                t_range=t_range,
                 report_progress=False,
-                dt=0.00001
+                dt=dt,
+                scheme=scheme
             )[:-1]
 
-            return expected_values - np.array(sol)[:, self._pde_solver.inner_radius:]
+            return expected_values - np.array(sol)[:, self._ivp.inner_radius:]
 
-        optimal_params = None
+        optimal_params: Optional[Parameters] = None
         optimal_mse = math.inf
 
         def iter_cb(params, iter_number, resid):
@@ -131,79 +177,129 @@ class Optimizer:
                     f'MSE: {mse:6.4f}'
                 )
 
-        minimizer = Minimizer(target_function, parameters, iter_cb=iter_cb, max_nfev=max_iter)
+        # noinspection PyTypeChecker
+        minimizer = Minimizer(target_function, parameters.copy(), iter_cb=iter_cb, max_nfev=max_iter)
 
-        if method in ('SLSQP', 'COBYLA'):
+        if method in ('SLSQP', 'COBYLA', 'Powell'):
             minimizer.minimize(method=method, tol=tol)
 
-        elif method in ('leastsq', 'Powell'):
+        elif method in ('leastsq',):
             minimizer.minimize(method=method, xtol=tol, ftol=tol)
 
         else:
             raise ValueError(f'Unsupported method: {method}')
 
-        self._pde_solver.pde.update_parameters(optimal_params)
-        self._optimal_solution = self._pde_solver.solve(
-            collection_interval=self._t_range / (len(self._expected_values) - 1),
-            t_range=self._t_range,
+        self._ivp_solver.pde.parameters = optimal_params
+        self._optimal_solution = self._ivp_solver.solve(
+            collection_interval=t_range / (len(self._ivp.expected_values) - 1),
+            t_range=t_range,
             report_progress=False,
-            dt=0.00001
+            dt=dt
         )[:-1]
         self._optimal_parameters = optimal_params
-        self._optimal_mse = optimal_mse / self._expected_values.shape[1]
+        self._optimal_mse = optimal_mse / self._ivp.expected_values.shape[1]
 
-        return optimal_params  # type: ignore
+        pred = np.array(self._optimal_solution)[:, self._ivp.inner_radius:]
+        self._optimal_rsqrd = (
+                1
+                - np.sum((expected_values - pred) ** 2)
+                / np.sum((expected_values - np.mean(expected_values)) ** 2)
+        )
+        self._time_required = time.time() - start_time
 
-    def plot_profile_comparisons(
+        return optimal_params
+
+
+class DynamicMeshResolutionOptimizer(OptimizerBase):
+    """
+    Optimizer for symmetric IVPBCs with dynamic mesh resolution.
+
+    This class extends the `OptimizerBase` class and implements the `optimize` method to perform optimization
+    of the IVBCP parameters with varying mesh resolutions. The optimization process starts with a low resolution
+    and iteratively increases the resolution until a specified maximum resolution is reached.
+    """
+
+    @property
+    def message(self):
+        return self._message
+
+    def optimize(
             self,
-            movie: Movie | str,
-            frame_offset: int = 0,
-            optimal_solution: np.ndarray = None
-    ) -> None:
-        """
-        Plot comparisons between expected and optimized diffusion profiles.
+            parameters: Parameters,
+            max_iterations_per_resolution: int = 50,
+            tol: float = 1e-4,
+            report_progress: bool = False,
+            method: str | None = 'leastsq',
+            dt: float = 1e-4,
+            max_resolution=-1,
+            min_resolution=40,
+    ) -> Parameters:
+        params = parameters.copy()
 
-        Args:
-            movie (Movie | str): A movie to save the comparisons.
-            frame_offset (int): Frame offset for labeling.
-            optimal_solution (np.ndarray): Optional optimized diffusion profiles.
-        """
+        if max_resolution == -1: max_resolution = self._ivp.width
+        if min_resolution == -1: min_resolution = self._ivp.width
+        if min_resolution > max_resolution:
+            raise ValueError('`min_resolution` cannot be larger than `max_resolution`')
 
-        if self.optimal_solution is None and optimal_solution is None:
-            raise ValueError('The optimal_solution was not provided nor has the "optimize" method been called.')
+        total_number_of_iterations = 0
+        total_time = 0
 
-        optimal_solution = optimal_solution if optimal_solution is not None else self.optimal_solution
+        for resolution in [
+            min(min_resolution * 2 ** n, max_resolution)
+            for n in range(int(np.ceil(np.log2(max_resolution / min_resolution))) + 1)
+        ]:
+            ivp = self._ivp.resized(resolution)
 
-        if isinstance(movie, str):
-            movie = Movie(filename=movie, dpi=100)
+            optimizer = StaticMeshResolutionOptimizer(ivp)
+            try:
+                params = optimizer.optimize(
+                    params,
+                    max_iter=max_iterations_per_resolution,
+                    tol=tol,
+                    report_progress=False,
+                    method=method,
+                    dt=dt
+                )
+            except Exception as exp:
+                raise RuntimeError(f'An exception has occurred at pde={type(self._ivp_solver.pde).__name__} '
+                                   f'file={self._ivp.file_name} resolution={resolution}') from exp
 
-        dpi = movie.dpi
-        fig_width, fig_height = 1280 / dpi, 720 / dpi
-        fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
+            total_number_of_iterations += optimizer.number_of_iterations
+            total_time += optimizer.time_required
 
-        y_min = min(
-            np.min(np.array(optimal_solution)[:, self._pde_solver.inner_radius:]),
-            np.min(self._expected_values)
-        )
-        y_max = max(
-            np.max(np.array(optimal_solution)[:, self._pde_solver.inner_radius:]),
-            np.max(self._expected_values)
-        )
+            stats = {
+                'pde': type(self._ivp_solver.pde).__name__,
+                'file': self._ivp.file_name,
+                'resolution': resolution,
+                'iterations': optimizer.number_of_iterations,
+                'time': optimizer.time_required,
+                'mse': optimizer.optimal_mse,
+                'rsqrd': optimizer.optimal_rsqrd,
+                **{name: param.value for name, param in params.items()}
+            }
+            self._stats.append(stats)
 
-        for i, (expected_frame, solution_frame) in enumerate(zip(self._expected_values, optimal_solution)):
-            ax.clear()
-            ax.set_ylim(y_min, y_max)
-            ax.set_xlim(0, len(self._expected_values[0]))
+            if report_progress:
+                message = (
+                    f'pde={type(self._ivp_solver.pde).__name__}, '
+                    f'file={self._ivp.file_name}, '
+                    f'resolution={resolution}, '
+                    f'iterations={optimizer.number_of_iterations}, '
+                    f'time={optimizer.time_required}, '
+                    f'mse={optimizer.optimal_mse}, '
+                    f'rsqrd={optimizer.optimal_rsqrd}, '
+                )
+                message += ', '.join([f'{name}={param.value}' for name, param in params.items()])
+                print(message)
+                self._message += message + '\n'
 
-            a = 0.8
-            for j in range(i - 1, max(i - 6, -1), -1):
-                ax.plot(optimal_solution[j], color='grey', alpha=a)
-                a -= 0.18
+        # noinspection PyUnboundLocalVariable
+        self._ivp_solver.pde.parameters = optimizer.optimal_parameters
+        self._optimal_solution = optimizer.optimal_solution
+        self._optimal_parameters = optimizer.optimal_parameters
+        self._optimal_mse = optimizer.optimal_parameters
+        self._optimal_rsqrd = optimizer.optimal_rsqrd
+        self._number_of_iterations = total_number_of_iterations
+        self._time_required = total_time
 
-            ax.plot(expected_frame, color='red')
-            ax.plot(solution_frame, color='blue')
-            ax.set_title(f'frame: {int(frame_offset + i):3d}')
-
-            movie.add_figure(fig)
-
-        movie.save()
+        return self.optimal_parameters
