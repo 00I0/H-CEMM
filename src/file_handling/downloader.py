@@ -2,7 +2,7 @@ import json
 
 import gdown
 
-from src.file_meta import FileMeta
+from file_handling.file_meta import FileMeta
 
 
 class Downloader:

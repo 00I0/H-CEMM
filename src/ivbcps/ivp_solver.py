@@ -4,8 +4,8 @@ from typing import Tuple, MutableSequence
 import numpy as np
 from pde import ScalarField, CallbackTracker, CartesianGrid, Boundaries, PeriodicityError
 
-from ivbcp import SymmetricIVBCPBase
-from src.diffusion_PDEs import DiffusionPDEBase
+from ivbcps.diffusion_PDEs import DiffusionPDEBase
+from ivbcps.ivbcp import SymmetricIVBCPBase
 
 
 class IVPSolverBase(ABC):
@@ -136,10 +136,9 @@ class SymmetricIVPSolver(IVPSolverBase):
     def solve(
             self,
             t_range: float | Tuple[float, float],
-            dt: float = 1e-4,
+            dt: float | None = 1e-4,
             collection_interval: float | None = None,
             report_progress: bool = True,
-            adaptive: bool = False,
             scheme: str = 'rk45'
     ) -> list[np.ndarray]:
         """
@@ -148,10 +147,10 @@ class SymmetricIVPSolver(IVPSolverBase):
 
         Args:
             t_range (Union[float, Tuple[float, float]]): The time range for the simulation.
-            dt (float): The time step for the simulation.
+            dt (float | None): The time step for the simulation. If None the `self.pde.calculate_delta_t` will be used.
             collection_interval (Union[float, None]): Optional interval for collecting simulation states.
             report_progress (bool): Whether to report progress during the simulation.
-            scheme (str): The numerical integration scheme to use (e.g., 'rk45', 'euler').
+            scheme (str): The numerical integration scheme to use (e.g.: 'rk45', 'euler').
 
         Returns:
             list: Collected states of the system as np.ndarray instances at each interval.
@@ -159,7 +158,6 @@ class SymmetricIVPSolver(IVPSolverBase):
         """
 
         initial_condition = np.pad(
-            # self._initial_condition[self.inner_radius:],
             self._initial_condition,
             (0, self._padding),
             mode='constant',
@@ -167,7 +165,6 @@ class SymmetricIVPSolver(IVPSolverBase):
         )
         grid = CartesianGrid(
             bounds=[(0, 1), (0, self._spatial_size)],
-            # bounds=[(0, 1), (0, 1000)],
             shape=(1, len(initial_condition)),
             periodic=self._periodicity
         )
@@ -187,7 +184,11 @@ class SymmetricIVPSolver(IVPSolverBase):
             trackers.append(collecting_tracker)
 
         pde = self._pde
-        end_state = pde.solve(state, t_range=t_range, dt=dt, tracker=trackers, adaptive=adaptive, scheme=scheme)
+        dt = dt or min(pde.calculate_delta_t(self._spatial_size / len(initial_condition)), 0.95 * collection_interval)
+        if dt <= 0:
+            raise ValueError(f'dt must be greater than 0 but it was: {dt}')
+        
+        end_state = pde.solve(state, t_range=t_range, dt=dt, tracker=trackers, adaptive=False, scheme=scheme)
 
         if self._is_padding_with_nans:
             state_container.append(np.concatenate((
@@ -267,6 +268,7 @@ class CartesianIVPSolver(IVPSolverBase):
             dt (float): The time step for the simulation.
             collection_interval (float | None): Interval for collecting simulation states (optional).
             report_progress (bool): Whether to report progress during the simulation.
+            scheme (str): The numerical integration scheme to use (e.g.: 'rk45', 'euler').
 
         Returns:
             A python list with the collected states (as np.ndarray). The last entry will always be the state

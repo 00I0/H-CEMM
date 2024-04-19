@@ -1,50 +1,85 @@
-# H-CEMM
-## Diffusion Analysis Project
+# Project Overview
 
-This project focuses on analyzing diffusion data obtained from experiments on fish. It provides a Python package that includes classes for loading, processing, and visualizing the diffusion data.
+**H-CEMM: Modeling ATP Diffusion Using Partial Differential Equations**
 
-### Installation
+This project is focused on the simulation and analysis of ATP molecule diffusion in biological environments using
+mathematical models based on partial differential equations (PDEs).
 
-You can use this project form [this notebook](https://colab.research.google.com/drive/1hF2iO7PVChLhxLPhayTbrtgaHG04MJVo?usp=sharing)
+The project's approach provides an integrative framework for fitting complex diffusion models to empirical data,
+allowing for detailed exploration and optimization of model parameters to closely match observed patterns.
 
-### Usage
+# Installation and Setup
 
-#### DiffusionArray Class
+To get started with the H-CEMM project, follow these steps to set up your environment:
 
-The `DiffusionArray` class is a wrapper around a numpy array representing diffusion data. It provides methods for loading data from files, extracting frames or channels.
+1. **Clone the Repository:**
+   Ensure you have git installed and clone the project repository to your local machine using:
 
-```python
-from diffusion_array import DiffusionArray
+   ```git clone https://github.com/00I0/H-CEMM.git```
 
-# Create a DiffusionArray object from a file
-diff_array = DiffusionArray('data.npy')
 
-# Extract a single frame
-frame_data = diff_array.frame(0)
+2. **Install Python Dependencies:**
+   The project requires Python 3.x and several dependencies which are listed in the `requirements.txt` file. Install
+   these using pip:
 
-# Extract a single channel
-channel_data = diff_array.channel(1)
+   ```pip install -r requirements.txt```
 
-```
+3. **Download the .nd2 files**
 
-#### Reader and Writer classes
+   Download the nd2 files for which you want to run the program than
 
-The `Reader` class provides a way to instantiate the correct reader based on the file extension. Similarly, the `Writer` class allows you to instantiate the correct writer based on the file extension. This enables easy loading and saving of diffusion data in different formats.
+# Folder Structure and File Descriptions
 
-```python
-from reader import Reader
-from writer import Writer
+The project is organized into several directories, each serving a specific function in the workflow:
 
-# Create a reader based on the file extension
-reader = Reader.of_type('data.nd2')
+- **params/**
+    - Contains optimized parameter values for the PDE models.
+    - `dirichlet_boundary_adaptive_dt_optimized.csv` - Contains optimized parameters using Dirichlet boundary conditions
+      and adaptive delta t.
 
-# Load the diffusion data using the reader
-diff_array = reader.read('data.nd2')
+- **scripts/**
+    - Houses scripts for running simulations and generating plots.
+    - `diffusion_model_plotter.py` - Plots results from the diffusion model simulations.
+    - `misc_plotter.py` - Provides miscellaneous plotting functionalities.
+    - `optimization_runner.py` - Script to run the optimization process for fitting PDEs to measured data.
 
-# Create a writer based on the file extension
-writer = Writer.of_type('data.npz')
+- **src/**
+    - Source code for the project.
+    - `core/` - Includes main logic for diffusion analysis.
+        - `analyzer.py` - Finds the start frame and the start places of the process.
+        - `diffusion_array.py` - Manages diffusion data arrays.
+        - `homogenizer.py` - Realizes the homogenization algorithm.
+        - `mask.py` - Could be used to select parts of the data.
+        - `radial_time_profile.py` - Implementation of the Radial Time Profile matrix.
+        - `step_widget.py` - Provides interactive widgets for step-by-step preprocessing control.
+        - `step_widget.css` - CSS for styling step widgets.
+    - `file_handling/` - Manages file input/output operations.
+        - `downloader.py` - Handles downloading of external data.
+        - `file_meta.py` - Manages metadata associated with files.
+        - `reader.py` - Reads data from files.
+        - `writer.py` - Writes data to files.
+    - `ivbcps/` - Contains implementation of initial and boundary value problems for PDEs.
+        - `diffusion_PDEs.py` - Contains the PDE definitions for diffusion processes.
+        - `ivbcp.py` - Handles initial and boundary value condition setup.
+        - `ivp_solver.py` - Solves initial value problems.
+        - `optimizer.py` - Optimizes PDE parameters to fit experimental data.
+    - `interactive_plots.ipynb` - Jupyter notebook for interactive visualization of the data and some processing steps.
 
-# Save the diffusion data using the writer
-writer.save(diff_array, 'output.npz')
-```
+# Functionality
+
+- **diffusion_model_plotter.py:**
+
+  This script generates plots from the output of diffusion simulations. It uses parameters defined
+  in csv file with similar structure to `dirichlet_boundary_adaptive_dt_optimized.csv`.
+
+
+- **misc_plotter.py:**
+
+  Provides functionality for creating a variety of additional plots that are not directly related to the core diffusion
+  simulations but help in data analysis and presentation.
+
+
+- **optimization_runner.py:**
+
+  Runs the parameter optimization algorithm to fit the diffusion models to the actual measured data.
 

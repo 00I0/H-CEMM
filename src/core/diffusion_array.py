@@ -5,10 +5,10 @@ from typing import Iterator, Any, Optional, List, Callable, Tuple
 
 import numpy as np
 
-from src.file_meta import FileMeta
-from src.mask import Mask
-from src.reader import Reader
-from src.writer import Writer
+from core.mask import Mask
+from file_handling.file_meta import FileMeta
+from file_handling.reader import Reader
+from file_handling.writer import Writer
 
 
 class DiffusionArray:

@@ -26,6 +26,7 @@ class FileMeta:
         """
 
         split = path.split(os.path.sep)
+        # noinspection PyTypeChecker
         return FileMeta(split[-1], None, split[-2] if len(split) > 1 else '.', None)
 
     @staticmethod
@@ -33,6 +34,7 @@ class FileMeta:
         """
         Creates a FileMeta object where drive_id, folder and homogenized_id are None.
         """
+        # noinspection PyTypeChecker
         return FileMeta(name, None, None, None)
 
     @staticmethod

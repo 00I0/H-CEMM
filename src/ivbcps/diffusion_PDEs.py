@@ -1,7 +1,8 @@
 import functools
+import warnings
 from abc import ABC, abstractmethod
 from builtins import float
-from typing import Optional, Callable, Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 from lmfit import Parameters
@@ -14,67 +15,48 @@ class DiffusionPDEBase(PDEBase, ABC):
     """
     Base class for diffusion partial differential equations (PDEs).
 
-    This class defines the common interface for diffusion PDEs. Subclasses should implement the `evolution_rate` method
-     to specify the PDE's behavior. The following methods should also be implemented: `_make_pde_rhs_numba` and
-     `update_parameters`
+    This class provides a common interface and functionality for different types of diffusion PDEs.
+    Subclasses are required to implement the methods for calculating the evolution rate, right-hand side of the PDE,
+    and the specific delta t calculation.
 
     Properties:
         bc (BoundariesData): The boundary conditions for the PDE.
 
-    Attributes:
-        diffusivity (float): The diffusivity coefficient of the PDE.
-
     Methods:
-        evolution_rate(state, t): Calculate the evolution rate of the PDE at a given state and time.
-        _make_pde_rhs_numba(state, **kwargs): Create a Numba-compiled function for calculating the PDE right-hand side.
-        update_parameters(parameters): Update PDE parameters from a set of lmfit.Parameters.
-
-    Properties:
-        bc (BoundariesData): Property for getting and setting the boundary conditions.
-        diffusivity (float): Property for getting and setting the diffusivity coefficient.
+        evolution_rate: Calculate the right hand side of the PDE at a given state and time.
+        _make_pde_rhs_numba: Create a Numba-compiled function for calculating the PDE right-hand side.
+        calculate_delta_t: Calculate the appropriate time step (delta t) for numerical solutions based on stability
+            criteria.
     """
 
     def __init__(
             self,
             parameters: Parameters,
-            # T: int,
             bc: BoundariesData = 'auto_periodic_neumann',
-            # noise: float = 0,
-            # rng: Optional[np.random.Generator] = None,
-            # s: float = 0,
-            # norm_mu: Optional[float] = None,
-            # norm_sigma: Optional[float] = None
             **kwargs
     ):
         """
-        Initialize a DiffusionPDEBase.
+        Initializes a DiffusionPDEBase instance with specified parameters and boundary conditions.
 
         Args:
-            diffusivity (float): The diffusivity coefficient of the PDE.
+            parameters (Parameters): lmfit.Parameters object containing the parameters for the PDE.
+            bc (BoundariesData, optional): Boundary conditions for the PDE. Defaults to 'auto_periodic_neumann'.
 
-            bc (BoundariesData): The boundary conditions for the PDE.
-            noise (float): Variance of the additive Gaussian white noise that is supported for all PDEs by default.
-                If set to zero, a deterministic partial differential equation will be solved.
-            rng (Optional[np.random.Generator]): Random number generator for noise.
-                Note that this random number generator is only used for numpy functions, while compiled numba code is
-                unaffected. Using the same generator for solving PDEs concurrently is strongly discouraged.
+        Raises:
+            KeyError: If a parameter provided in kwargs is not applicable to the PDE.
         """
         super().__init__(noise=0, rng=None)
         self._bc = bc
         self._is_bc_invalid = False
 
-        # self.s = s
         self.norm_mu = 0
         self.norm_sigma = 1
         self.T = 0
-        #
-        # self.diffusivity = diffusivity
 
         self._cached_numba_rhs = None
 
         self._parameters = parameters
 
-        # existing_parameter_names = [param.name for param in self._parameters]
         for key in kwargs:
             if key not in self._parameters:
                 raise KeyError(f'Parameter {key} is not applicable to this pde({type(self)})')
@@ -84,21 +66,24 @@ class DiffusionPDEBase(PDEBase, ABC):
     @abstractmethod
     def evolution_rate(self, state: ScalarField, t: float = 0) -> ScalarField:
         """
-        Calculate the evolution rate of the PDE at a given state and time.
+        Abstract method to calculate the evolution rate / right hand side of the PDE at a given state and time.
 
         Args:
-            state (ScalarField): The current state of the PDE.
+            state (ScalarField): The current state of the simulation.
             t (float): The current time.
 
         Returns:
             ScalarField: The evolution rate of the PDE.
+
+        Note:
+            Must be implemented by subclasses to define specific behavior.
         """
         raise NotImplementedError()
 
     @abstractmethod
     def _make_pde_rhs_numba(self, state: ScalarField, **kwargs) -> Callable[[np.ndarray, float], np.ndarray]:
         """
-        Create a Numba-compiled function for calculating the PDE right-hand side.
+        Abstract method to create a Numba-compiled function for calculating the PDE right-hand side.
         Should only be used internally.
 
         Args:
@@ -106,23 +91,48 @@ class DiffusionPDEBase(PDEBase, ABC):
             **kwargs: Additional keyword arguments.
 
         Returns:
-            Callable[[np.ndarray, float], np.ndarray]: A Numba-compiled function for calculating the right-hand side.
+            Callable[[np.ndarray, float], np.ndarray]: A function compiled with Numba that takes the state data and time
+            as inputs and returns the evolution rate of the state data.
+
+        Note:
+            Must be implemented by subclasses to define the numerical computation for the PDE.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def calculate_delta_t(self, delta_x):
+        """
+        Abstract method to calculate the appropriate time step (delta t) based on spatial resolution (delta x).
+
+        Args:
+            delta_x (float): The spatial resolution of the grid.
+
+        Note:
+            Must be implemented by subclasses based on the stability criteria of the numerical method used.
         """
         raise NotImplementedError()
 
     @property
     def parameters(self) -> Parameters:
+        """
+        Gets the parameters for the PDE.
+
+        Returns:
+            Parameters: The current set of parameters for the PDE.
+        """
         return self._parameters
 
     @parameters.setter
     def parameters(self, parameters: Parameters) -> None:
         """
-        Update PDE parameters from a set of lmfit.Parameters.
+        Sets the parameters for the PDE.
 
         Args:
-            parameters (Parameters): The lmfit.Parameters object containing parameter values.
+            parameters (Parameters): A Parameters instance from lmfit with updated values for the PDE.
+
+        Raises:
+            KeyError: If a parameter in the provided Parameters instance is not applicable to this PDE.
         """
-        # existing_parameter_names = [param.name for param in self._parameters]
         for parameter in parameters.values():
             if parameter.name not in self._parameters:
                 raise KeyError(f'Parameter {parameter.name} is not applicable to this pde({type(self)})')
@@ -131,8 +141,38 @@ class DiffusionPDEBase(PDEBase, ABC):
 
     @property
     def parameter_values(self):
+        """
+        Provides indexed access to the parameter values stored in this PDE.
+
+        This property returns an instance of a nested class that supports indexed access by parameter name or a sequence
+        of names, allowing for easy retrieval of one or more parameter values at once.
+
+        Returns:
+            ParameterValueAccessor: An accessor object for the parameter values.
+
+        Example:
+            >>> pde = LinearDiffusivityPDE()
+            >>> diffusivity = pde.parameter_values['diffusivity']
+            >>> mu, s = pde.parameter_values['mu', 's']
+            >>> print(f"Diffusivity: {diffusivity}, Mu: {mu}, S: {s}")
+            Diffusivity: 0.36, Mu: -0.04, S: 0.0
+
+            This example shows how to access single and multiple parameter values.
+        """
+
         class ParameterValueAccessor:
+            # noinspection PyMethodParameters
             def __getitem__(_, keys: str | Sequence[str]) -> list[float]:
+                """
+                Retrieves the value of one or more parameters.
+
+                Args:
+                    keys (Union[str, Sequence[str]]): A single parameter name or a list/tuple of parameter names.
+
+                Returns:
+                    Union[float, List[float]]: The value of the requested parameter if a single name is provided, or
+                        a list of values if multiple names are provided.
+                """
                 if isinstance(keys, str):
                     keys = [keys]
                 return [self.parameters[key].value for key in keys]
@@ -141,14 +181,24 @@ class DiffusionPDEBase(PDEBase, ABC):
 
     @property
     def bc(self) -> BoundariesData:
+        """
+        Gets the current boundary conditions.
+
+        Returns:
+            BoundariesData: The boundary conditions of the PDE.
+        """
         return self._bc
 
     @bc.setter
     def bc(self, bc: BoundariesData) -> None:
         """
-        A setter for boundary conditions.
+        Sets new boundary conditions for the PDE.
 
-        Please be cautious changing the boundary conditions after rhs has been numba compiled, will have no effect.
+        Args:
+            bc (BoundariesData): New boundary conditions.
+
+        Notes:
+            Changing boundary conditions after the RHS function has been compiled will not affect the existing function.
         """
         self._bc = bc
         self._is_bc_invalid = True
@@ -173,21 +223,45 @@ class DiffusionPDEBase(PDEBase, ABC):
 
         return 1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-1 / 2 * ((x - mu) / sigma) ** 2)
 
+    @staticmethod
+    def _validate_delta_t(func):
+        """
+        Decorator to validate the delta t value calculated by any calculate_delta_t method.
+
+        This decorator checks the computed delta t value to ensure it's within a reasonable range.
+        If delta t is too small or negative, warnings are issued and adjusted accordingly.
+
+        Args:
+            func (Callable): A function that calculates delta t.
+
+        Returns:
+            Callable: A wrapped function with delta t validation.
+        """
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            delta_t = func(*args, **kwargs)
+            if delta_t <= 1e-7:
+                warnings.warn(f'Small delta t encountered: {delta_t}, this may result in long computation times.')
+            if delta_t <= 0:
+                warnings.warn(f'Negative delta t encountered: {delta_t}, using default delta t ({1e-4}) instead.')
+                delta_t = 1e-4
+            return delta_t
+
+        return wrapper
+
 
 class LinearDiffusivityPDE(DiffusionPDEBase):
     r"""
-    A simple diffusion equation with linear breakdown of the concentration.
+    Implements a linear diffusion equation with breakdown of the concentration over time.
 
     The mathematical definition is:
 
+    The linear diffusion equation modeled by this class is given by the PDE:
     .. math::
-        \partial_t c = D \cdot \nabla^2 c - \mu c
+        \partial_t c = D \nabla^2 c - \mu c^n
 
     where :math:`c` is a scalar field, :math:`D` denotes the diffusivity and :math:`\mu` the breakdown coefficient.
-
-    Attributes:
-        diffusivity (float): :math:`D`, the diffusivity coefficient of the PDE.
-        mu (float):  :math:`\mu`, the breakdown coefficient of the PDE.
     """
 
     def __init__(
@@ -196,18 +270,12 @@ class LinearDiffusivityPDE(DiffusionPDEBase):
             **kwargs
     ):
         """
-        Initialize a LinearDiffusivityPDE.
+        Initializes the LinearDiffusivityPDE with specific parameters and boundary conditions.
 
         Args:
-            diffusivity (float): The diffusivity coefficient of the PDE.
-            mu (float): The breakdown coefficient of the PDE.
-
-            bc (BoundariesData): The boundary conditions for the PDE.
-            noise (float): Variance of the additive Gaussian white noise that is supported for all PDEs by default.
-                If set to zero, a deterministic partial differential equation will be solved.
-            rng (Optional[np.random.Generator]): Random number generator for noise.
-                Note that this random number generator is only used for numpy function, while compiled numba code is
-                unaffected. Using the same generator for solving PDEs concurrently is strongly discouraged.
+            bc (BoundariesData, optional): Boundary conditions for the PDE. Defaults to 'auto_periodic_neumann'.
+            **kwargs: Additional keyword arguments for overriding default parameter values, for 'diffusivity'
+                    'mu' and 'n'.
         """
 
         params = Parameters()
@@ -232,11 +300,6 @@ class LinearDiffusivityPDE(DiffusionPDEBase):
         if not isinstance(state, ScalarField):
             raise ValueError('state must be a ScalarField.')
 
-        # diffusivity = self.parameters['diffusivity'].value
-        # mu = self.parameters['mu'].value
-        # s = self.parameters['s'].value
-        # n = self.parameters['n'].value
-        #
         diffusivity, mu, s, n = self.parameter_values['diffusivity', 'mu', 's', 'n']
 
         laplace_applied = state.laplace(bc=self.bc, label='evolution rate', args={'t': t})
@@ -283,12 +346,28 @@ class LinearDiffusivityPDE(DiffusionPDEBase):
                 self.parameters['n'].value
             )
 
-            if self.parameters['s'].value == 0: return rhs
+            if self.parameters['s'].value == 0:
+                return rhs
 
             norm_dist = self.parameters['s'].value * self.normal_dist(state_data.shape, t)
             return rhs + norm_dist
 
         return pde_rhs
+
+    @DiffusionPDEBase._validate_delta_t
+    def calculate_delta_t(self, delta_x: float) -> float:
+        """
+        Calculates an optimal time step based on spatial discretization to ensure stability of the numerical solution.
+
+        Args:
+            delta_x (float): The spatial step size.
+
+        Returns:
+            float: The recommended time step size.
+        """
+        diffusivity, mu = self.parameter_values['diffusivity', 'mu']
+        delta_t = 0.95 * 2 / ((4 * diffusivity / (delta_x ** 2)) + mu)
+        return delta_t
 
 
 class SigmoidDiffusivityPDE(DiffusionPDEBase):
@@ -298,16 +377,9 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
     The mathematical definition is:
 
     .. math::
-        \partial_t c = \frac{1}{1 + e^{{\left(\beta - D  c\right)}}} \nabla^2 c - \mu c^n
+        \partial_t c = \frac{\gamma}{1 + e^{{\left(\beta - D  c\right)}}} \nabla^2 c - \mu c^n
 
-    where :math: `c` is a scalar field, :math: `\beta` is the sigmoid translation factor, :math: `D` is the diffusivity
-    and :math:`\mu` the breakdown coefficient.
-
-    Attributes:
-        diffusivity (float): :math:`D`, the diffusivity coefficient of the PDE.
-        mu (float): :math: `\mu`, the breakdown coefficient of the PDE.
-        beta (float): :math: `\beta`, the sigmoid translation factor.
-        n (int): :math: `n`, the exponent of the sigmoid function.
+    where :math: `c` is a scalar field.
     """
 
     def __init__(
@@ -316,20 +388,12 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
             **kwargs
     ):
         """
-        Initialize a SigmoidDiffusivityPDE.
+        Initializes the SigmoidDiffusivityPDE with specific parameters and boundary conditions.
 
         Args:
-            diffusivity (float): The diffusivity coefficient of the PDE.
-            mu (float): The breakdown coefficient of the PDE.
-            beta (float): The sigmoid translation factor.
-            n (int): The exponent of the sigmoid function.
-
-            bc (BoundariesData): The boundary conditions for the PDE.
-            noise (float): Variance of the additive Gaussian white noise that is supported for all PDEs by default.
-                If set to zero, a deterministic partial differential equation will be solved.
-            rng (Optional[np.random.Generator]): Random number generator for noise.
-                Note that this random number generator is only used for numpy function, while compiled numba code is
-                unaffected. Using the same generator for solving PDEs concurrently is strongly discouraged.
+            bc (BoundariesData, optional): Boundary conditions for the PDE. Defaults to 'auto_periodic_neumann'.
+            **kwargs: Additional keyword arguments for overriding default parameter values, for 'diffusivity'
+                    'mu', 'beta', 'n' and 'gamma'.
         """
 
         beta_bound = np.log((1 - 0.01) / 0.01)
@@ -356,12 +420,6 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
         """
         if not isinstance(state, ScalarField):
             raise ValueError('state must be a ScalarField.')
-
-        # diffusivity = self.parameters['diffusivity'].value
-        # beta = self.parameters['beta'].value
-        # mu = self.parameters['mu'].value
-        # s = self.parameters['s'].value
-        # n = self.parameters['n'].value
 
         diffusivity, beta, mu, s, n, gamma = self.parameter_values['diffusivity', 'beta', 'mu', 's', 'n', 'gamma']
         laplace_applied = state.laplace(bc=self.bc, label='evolution rate', args={'t': t})
@@ -414,30 +472,40 @@ class SigmoidDiffusivityPDE(DiffusionPDEBase):
                 self.parameters['gamma'].value
             )
 
-            if self.parameters['s'].value == 0: return rhs
+            if self.parameters['s'].value == 0:
+                return rhs
 
             norm_dist = self.parameters['s'].value * self.normal_dist(state_data.shape, t)
             return rhs + norm_dist
 
         return pde_rhs
 
+    @DiffusionPDEBase._validate_delta_t
+    def calculate_delta_t(self, delta_x: float) -> float:
+        """
+        Calculates an optimal time step based on spatial discretization to ensure stability of the numerical solution.
+
+        Args:
+            delta_x (float): The spatial step size.
+
+        Returns:
+            float: The recommended time step size.
+        """
+        gamma, mu = self.parameter_values['gamma', 'mu']
+        delta_t = 0.95 * 2 / ((4 * gamma / (delta_x ** 2)) + mu)
+        return delta_t
+
 
 class LogisticDiffusionPDE(DiffusionPDEBase):
     r"""
-    A diffusion equation with a source term for the concentration.
+    Implements the Fisher-KPP equation.
 
      The mathematical definition is:
 
     .. math::
         \partial_t c = D \cdot \nabla^2 c + \alpha c \cdot (\lambda - c)
 
-    where :math: `c` is a scalar field, :math: `\alpha` is the scaling factor, :math: `D` is the diffusivity
-    and :math:`\lambda` is the translation factor.
-
-    Attributes:
-        diffusivity (float): :math:`D`, the diffusivity coefficient of the PDE.
-        lambda_term (float): :math: `\lambda`, the translation factor of the source term.
-        alpha (float): :math: `\alpha`, the scaling factor of the source term.
+    where :math: `c` is a scalar field.
     """
 
     def __init__(
@@ -446,19 +514,12 @@ class LogisticDiffusionPDE(DiffusionPDEBase):
             **kwargs
     ):
         """
-        Initialize a LogisticDiffusionPDE.
+        Initializes the LogisticDiffusionPDE with specific parameters and boundary conditions.
 
         Args:
-            diffusivity (float): The diffusivity coefficient of the PDE.
-            lambda_term (float): The translation factor of the source term.
-            alpha (float): The scaling factor of the source term.
-
-            bc (BoundariesData): The boundary conditions for the PDE.
-            noise (float): Variance of the additive Gaussian white noise that is supported for all PDEs by default.
-                If set to zero, a deterministic partial differential equation will be solved.
-            rng (Optional[np.random.Generator]): Random number generator for noise.
-                Note that this random number generator is only used for numpy function, while compiled numba code is
-                unaffected. Using the same generator for solving PDEs concurrently is strongly discouraged.
+            bc (BoundariesData, optional): Boundary conditions for the PDE. Defaults to 'auto_periodic_neumann'.
+            **kwargs: Additional keyword arguments for overriding default parameter values, for 'diffusivity'
+                    'lambda_term', and 'alpha'.
         """
 
         params = Parameters()
@@ -482,11 +543,6 @@ class LogisticDiffusionPDE(DiffusionPDEBase):
         """
         if not isinstance(state, ScalarField):
             raise ValueError('state must be a ScalarField.')
-
-        diffusivity = self.parameters['diffusivity'].value
-        alpha = self.parameters['alpha'].value
-        lambda_term = self.parameters['lambda_term'].value
-        s = self.parameters['s'].value
 
         diffusivity, alpha, lambda_term, s = self.parameter_values['diffusivity', 'alpha', 'lambda_term', 's']
         laplace_applied = state.laplace(bc=self.bc, label='evolution rate', args={'t': t})
@@ -537,51 +593,90 @@ class LogisticDiffusionPDE(DiffusionPDEBase):
                 self.parameters['alpha'].value
             )
 
-            if self.parameters['s'].value == 0: return rhs
+            if self.parameters['s'].value == 0:
+                return rhs
 
             norm_dist = self.parameters['s'].value * self.normal_dist(state_data.shape, t)
             return rhs + norm_dist
 
         return pde_rhs
 
+    @DiffusionPDEBase._validate_delta_t
+    def calculate_delta_t(self, delta_x: float) -> float:
+        """
+        Calculates an optimal time step based on spatial discretization to ensure stability of the numerical solution.
+
+        Args:
+            delta_x (float): The spatial step size.
+
+        Returns:
+            float: The recommended time step size.
+        """
+        diffusivity, lambda_term, alpha = self.parameter_values['diffusivity', 'lambda_term', 'alpha']
+        delta_t = 0.95 * (-3 + np.sqrt(9 + 4 * alpha * (lambda_term + 1) * delta_x ** 2 * (1 / diffusivity))) / (
+                2 * alpha * (lambda_term + 1))
+
+        return delta_t
+
 
 class MixedPDE(DiffusionPDEBase):
+    r"""
+    Implements a mixture of the Logistic and Sigmoid equations.
+
+    The mathematical definition is:
+
+    .. math::
+        \partial_t c = \phi \left(  D \cdot \nabla^2 c + \alpha c \cdot (\lambda - c) \right)
+            \cdot (1-\phi)\left( \frac{\gamma}{1 + e^{{\left(\beta - Diffusivity  c\right)}}} \nabla^2 c - \mu c \right)
+
+    where :math: `c` is a scalar field.
+    """
 
     def __init__(
             self,
             bc: BoundariesData = 'auto_periodic_neumann',
             **kwargs
     ):
+        """
+        Initializes the MixedPDE with specific parameters and boundary conditions.
+
+        Args:
+            bc (BoundariesData, optional): Boundary conditions for the PDE. Defaults to 'auto_periodic_neumann'.
+            **kwargs: Additional keyword arguments for overriding default parameter values, for 'diffusivity'
+                    'mu', 'beta', 'gamma', 'D', 'lambda_term', 'alpha' and 'phi'.
+        """
+
         params = Parameters()
         params.add('D', 0.17, min=0, max=1)
         params.add('lambda_term', 0.22, min=0, max=1)
         params.add('alpha', 1, min=0, max=1)
-        # params.add('s', 0, min=0, max=10)
 
-        beta_bound = np.log((1 - 0.01) / 0.01)
+        beta_bound = np.log((1 - 0.1) / 0.1)
         params.add('diffusivity', 10, min=-20, max=20)
         params.add('mu', 0.04, min=-10, max=10)
         params.add('beta', -4.59, min=-beta_bound, max=beta_bound)
         params.add('gamma', 0.1, min=0, max=1)
-        # params.add('s', 0, min=0, max=10)
-        # params.add('n', 1)
 
         params.add('phi', value=0.5, min=0, max=1)
 
         super().__init__(parameters=params, bc=bc, **kwargs)
 
     def evolution_rate(self, state: ScalarField, t: float = 0) -> ScalarField:
+        """
+        Calculate the evolution rate of the LogisticDiffusionPDE.
+
+        Args:
+            state (ScalarField): The current state of the PDE.
+            t (float): The current time.
+
+        Returns:
+            ScalarField: The evolution rate of the PDE.
+        """
         if not isinstance(state, ScalarField):
             raise ValueError('state must be a ScalarField.')
 
-        # D = self.parameters['D'].value
-        # alpha = self.parameters['alpha'].value
-        # lambda_term = self.parameters['lambda_term'].value
+        # noinspection PyPep8Naming
         D, alpha, lambda_term = self.parameter_values['D', 'alpha', 'lambda_term']
-
-        # diffusivity = self.parameters['diffusivity'].value
-        # mu = self.parameters['mu'].value
-        # beta = self.parameters['beta'].value
         diffusivity, mu, beta, gamma = self.parameter_values['diffusivity', 'mu', 'beta', 'gamma']
 
         phi = self.parameters['phi'].value
@@ -596,6 +691,17 @@ class MixedPDE(DiffusionPDEBase):
         )
 
     def _make_pde_rhs_numba(self, state: ScalarField, **kwargs) -> Callable[[np.ndarray, float], np.ndarray]:
+        """
+        Create a Numba-compiled function for calculating the PDE right-hand side.
+        Should only be used internally.
+
+        Args:
+            state (ScalarField): The current state of the PDE.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Callable[[np.ndarray, float], np.ndarray]: A Numba-compiled function for calculating the right-hand side.
+        """
         if not isinstance(state, ScalarField):
             raise ValueError('state must be a ScalarField.')
 
@@ -617,8 +723,8 @@ class MixedPDE(DiffusionPDEBase):
         ) -> np.ndarray:
             diff_term = gamma / (1 + np.exp(beta - diffusivity * state_data))
             return (
-                    phi * (D * laplace_operator(state_data, args={'t': t}) + alpha * state_data * (
-                    lambda_term - state_data))
+                    phi * (D * laplace_operator(state_data, args={'t': t})
+                           + alpha * state_data * (lambda_term - state_data))
                     + (1 - phi) * (diff_term * laplace_operator(state_data, args={'t': t}) - mu * state_data)
             )
 
@@ -641,9 +747,27 @@ class MixedPDE(DiffusionPDEBase):
             )
 
             return rhs
-            # if self.parameters['s'].value == 0: return rhs
-            #
-            # norm_dist = self.parameters['s'].value * self.normal_dist(state_data.shape, t)
-            # return rhs + norm_dist
 
         return pde_rhs
+
+    @DiffusionPDEBase._validate_delta_t
+    def calculate_delta_t(self, delta_x: float) -> float:
+        """
+        Calculates an optimal time step based on spatial discretization to ensure stability of the numerical solution.
+
+        Args:
+            delta_x (float): The spatial step size.
+
+        Returns:
+            float: The recommended time step size.
+        """
+        # noinspection PyPep8Naming
+        D, lambda_term, alpha = self.parameter_values['D', 'lambda_term', 'alpha']
+        delta_t_logistic = 0.95 * ((-3 + np.sqrt(9 + 2 * alpha * (lambda_term + 1) * delta_x ** 2 * (1 / D)))
+                                   / (2 * alpha * (lambda_term + 1)))
+
+        gamma, mu = self.parameter_values['gamma', 'mu']
+        delta_t_sigmoid = 0.95 * 1.5 / ((4 * gamma / delta_x ** 2) + mu)
+
+        delta_t = min(delta_t_sigmoid, delta_t_logistic)
+        return delta_t

@@ -3,9 +3,9 @@ from typing import Callable, Tuple
 
 import numpy as np
 
-from src.diffusion_array import DiffusionArray
-from src.mask import Mask
-from src.radial_time_profile import RadialTimeProfile
+from core.diffusion_array import DiffusionArray
+from core.mask import Mask
+from core.radial_time_profile import RadialTimeProfile
 
 
 class Homogenizer:
@@ -83,7 +83,7 @@ class Homogenizer:
 
         max_distance = int(np.ceil(np.max(distances)) * 0.95)
         masked_data_array = diffusion_array[:].copy() * mask
-        intensities_by_distance = np.zeros((diffusion_array.number_of_frames - 1, max_distance))
+        intensities_by_distance = np.zeros((diffusion_array.shape[0], max_distance))
 
         for i in range(0, max_distance, self._delta_r):
             distances_i_delta_r_ = (i <= distances) & (distances < i + self._delta_r)
@@ -151,7 +151,7 @@ class Homogenizer:
                 axis=1,
             )
 
-        def center_point(self, center: Tuple[int, int]) -> 'Homogenizer.Builder':
+        def center_point(self, center: Tuple[float, float]) -> 'Homogenizer.Builder':
             """
             Specifies the point around which the array should be homogenized. This point must be provided.
 

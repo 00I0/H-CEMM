@@ -4,8 +4,8 @@ from typing import Tuple, Iterator
 import numpy as np
 import scipy.interpolate
 
-from src.analyzer import Analyzer
-from src.diffusion_array import DiffusionArray
+from core.analyzer import Analyzer
+from core.diffusion_array import DiffusionArray
 
 
 class RadialTimeProfile:

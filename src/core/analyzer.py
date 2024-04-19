@@ -3,8 +3,8 @@ import skimage
 from scipy import ndimage
 from scipy.ndimage import gaussian_filter
 
-from diffusion_array import DiffusionArray
-from src.mask import Mask
+from core.diffusion_array import DiffusionArray
+from core.mask import Mask
 
 
 class Analyzer:
@@ -60,7 +60,7 @@ class Analyzer:
         self.diffusion_array.cache(**{f'diffusion_start_frame {strategy}': ans})
         return ans
 
-    def detect_diffusion_start_place(self, strategy: str = 'connected-components', **kwargs) -> tuple:
+    def detect_diffusion_start_place(self, strategy: str = 'connected-components', **kwargs) -> tuple[float, float]:
         r"""
         Detects the place where the diffusion process starts. You can specify different strategies for the detection.
         The returned indices are in the form of (x, y).

@@ -1,3 +1,4 @@
+import os
 import sys
 from abc import abstractmethod
 from typing import Tuple, List, Optional
@@ -6,8 +7,8 @@ import ipywidgets as widgets
 import numpy as np
 from IPython.display import display
 
-from analyzer import Analyzer
-from diffusion_array import DiffusionArray
+from core.analyzer import Analyzer
+from core.diffusion_array import DiffusionArray
 
 
 class PipeLineWidget(widgets.Output):
@@ -33,7 +34,9 @@ class PipeLineWidget(widgets.Output):
         self._darr = darr
         self._display_mode = display_mode
 
-        with open('step_widget.css', 'r') as file:
+        directory = os.path.dirname(os.path.abspath(__file__))
+        css_file_path = os.path.join(directory, 'step_widget.css')
+        with open(css_file_path, 'r') as file:
             css_content = file.read()
         style_html = f'<style>{css_content}</style>'
         if display_mode:
@@ -90,7 +93,7 @@ class PipeLineWidget(widgets.Output):
         self._steps.append(_StepWidget(logic_widget, self))
         self.update_view()
 
-    def apply_pipeline(self, darr: DiffusionArray = None) -> Tuple[DiffusionArray, int, tuple]:
+    def apply_pipeline(self, darr: DiffusionArray = None) -> Tuple[DiffusionArray, int, Tuple[float, float]]:
         """
         Executes the pipeline and returns the resulting DiffusionArray and metadata.
 

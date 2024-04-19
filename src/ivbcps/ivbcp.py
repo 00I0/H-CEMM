@@ -4,8 +4,8 @@ from typing import Optional, List
 
 import numpy as np
 
-from diffusion_PDEs import DiffusionPDEBase
-from radial_time_profile import RadialTimeProfile
+from core.radial_time_profile import RadialTimeProfile
+from ivbcps.diffusion_PDEs import DiffusionPDEBase
 
 
 class SymmetricIVBCPBase(ABC):

@@ -6,8 +6,8 @@ from typing import Optional
 import numpy as np
 from lmfit import Parameters, Minimizer
 
-from ivbcp import SymmetricIVBCPBase
-from src.ivp_solver import SymmetricIVPSolver
+from ivbcps.ivbcp import SymmetricIVBCPBase
+from ivbcps.ivp_solver import SymmetricIVPSolver
 
 
 class OptimizerBase(ABC):
@@ -100,7 +100,7 @@ class OptimizerBase(ABC):
             tol: float = 1e-4,
             report_progress: bool = False,
             method: str | None = 'SLSQP',
-            dt: float = 1e-4,
+            dt: float | None = 1e-4,
     ):
         """
         Optimize the specified parameters of the IVBCP using optimization settings.
@@ -135,7 +135,7 @@ class StaticMeshResolutionOptimizer(OptimizerBase):
             tol: float = 1e-4,
             report_progress: bool = False,
             method: str | None = 'SLSQP',
-            dt: float = 1e-4,
+            dt: float | None = 1e-4,
             scheme: str = 'rk45'
     ) -> Parameters:
         start_time = time.time()
@@ -172,7 +172,7 @@ class StaticMeshResolutionOptimizer(OptimizerBase):
 
             if report_progress:
                 print(
-                    f'{iter_number :4d}: '
+                    f'{iter_number:4d}: '
                     f'{str([f"{param.name} {param.value:4.4f}" for param in params.values()]):120s} '
                     f'MSE: {mse:6.4f}'
                 )
@@ -230,14 +230,17 @@ class DynamicMeshResolutionOptimizer(OptimizerBase):
             tol: float = 1e-4,
             report_progress: bool = False,
             method: str | None = 'leastsq',
-            dt: float = 1e-4,
+            dt: float | None = 1e-4,
             max_resolution=-1,
             min_resolution=40,
+            scheme='rk45'
     ) -> Parameters:
         params = parameters.copy()
 
-        if max_resolution == -1: max_resolution = self._ivp.width
-        if min_resolution == -1: min_resolution = self._ivp.width
+        if max_resolution == -1:
+            max_resolution = self._ivp.width
+        if min_resolution == -1:
+            min_resolution = self._ivp.width
         if min_resolution > max_resolution:
             raise ValueError('`min_resolution` cannot be larger than `max_resolution`')
 
@@ -258,7 +261,8 @@ class DynamicMeshResolutionOptimizer(OptimizerBase):
                     tol=tol,
                     report_progress=False,
                     method=method,
-                    dt=dt
+                    dt=dt,
+                    scheme=scheme
                 )
             except Exception as exp:
                 raise RuntimeError(f'An exception has occurred at pde={type(self._ivp_solver.pde).__name__} '
