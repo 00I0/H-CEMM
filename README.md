@@ -12,6 +12,11 @@ allowing for detailed exploration and optimization of model parameters to closel
 
 To get started with the H-CEMM project, follow these steps to set up your environment:
 
+0. **Have Python:**
+   Please have Python 3.12 installed. Having and IDE like PyCharm would make the next steps easier for you, although it
+   is not strictly necessary.
+
+
 1. **Clone the Repository:**
    Ensure you have git installed and clone the project repository to your local machine using:
 
@@ -24,9 +29,10 @@ To get started with the H-CEMM project, follow these steps to set up your enviro
 
    ```pip install -r requirements.txt```
 
-3. **Download the .nd2 files**
 
-   Download the nd2 files for which you want to run the program than
+3. **Download the .nd2 files:**
+   Download the nd2 files for which you want to run the program than ensure that those parts of the files in scripts
+   directory that are related to io are referencing actual files.
 
 # Folder Structure and File Descriptions
 
@@ -65,7 +71,7 @@ The project is organized into several directories, each serving a specific funct
         - `optimizer.py` - Optimizes PDE parameters to fit experimental data.
     - `interactive_plots.ipynb` - Jupyter notebook for interactive visualization of the data and some processing steps.
 
-# Functionality
+# Script Functionality
 
 - **diffusion_model_plotter.py:**
 
