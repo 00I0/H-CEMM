@@ -547,4 +547,5 @@ def main(diffusion_array_path):
 
 
 if __name__ == '__main__':
+    # Ensure that this is the real address of an nd2 file
     main('G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl018.nd2')

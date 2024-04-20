@@ -56,6 +56,12 @@ def async_optimization_starter(directories: List[str]):
         rtp_start_frame_tuples.append((rtp, start_frame))
 
     beta_bound = np.log((1 - 0.1) / 0.1)
+
+    # By commenting out parts of the pde parameter pairs you can change which pdes to optimize, by commenting out a
+    # specific parameter (a line inside create_params) you can specify the parameters to be optimized fo that pde.
+    #
+    # If you are to change the parameter values (the value associated with the 'value' key in the dicts inside
+    # create_params), be extremely cautious as for some parameters there are no stable solutions for some pdes.
     pdes = [
         (
             LogisticDiffusionPDE(),
@@ -63,7 +69,6 @@ def async_optimization_starter(directories: List[str]):
                 diffusivity={'value': 300, 'min': 0, 'max': 2000},
                 lambda_term={'value': 0.5, 'min': 0, 'max': 1},
                 alpha={'value': 1, 'min': 0.01, 'max': 10},
-                # s={'value': 1, 'min': 0, 'max': 40}
             ),
         ),
         (
@@ -71,7 +76,6 @@ def async_optimization_starter(directories: List[str]):
             create_params(
                 diffusivity={'value': 300, 'min': 0, 'max': 2000},
                 mu={'value': 0.01, 'min': -1, 'max': 1},
-                # s={'value': 1, 'min': 0, 'max': 40}
             ),
         ),
         (
@@ -80,12 +84,9 @@ def async_optimization_starter(directories: List[str]):
                 diffusivity={'value': 1, 'min': -10, 'max': 10},
                 mu={'value': 0.05, 'min': -1, 'max': 1},
                 beta={'value': 0, 'min': -beta_bound, 'max': beta_bound},
-                # n={'value': 1, 'min': 0.25, 'max': 20},
                 gamma={'value': 20, 'min': 0, 'max': 2000},
-                # s={'value': 1, 'min': 0, 'max': 40}
             ),
         ),
-        #
         (
             MixedPDE(),
             create_params(
@@ -101,6 +102,9 @@ def async_optimization_starter(directories: List[str]):
         ),
     ]
 
+    # By changing the ivp_type to `VanillaSymmetricIVBCP` you can specify that you want to only optimize for the
+    # atp absorption / breakdown phase of the process, leaving it as `DerivativeSymmetricIVBCP` means you want to use
+    # time dependent Neumann boundary conditions
     ivp_type = DerivativeSymmetricIVBCP
     ivps = [
         (
@@ -118,8 +122,9 @@ def async_optimization_starter(directories: List[str]):
                 async_optimize_ivp,
                 max_number_of_support_points=-1,
                 min_number_of_support_points=40,
-                max_number_of_iterations=100,
-                dt=None
+                max_number_of_iterations=100,  # max iterations for a resolution
+                dt=None  # if this is none, dt will be calculated based on the parameter at that iteration
+                # (i.e. adaptive dt will be used)
             ),
             ivps
         )
@@ -165,6 +170,7 @@ def async_optimize_ivp(
 
 
 def main():
+    # Ensure that these are the directories containing the nd2 files
     directories = [
         r'G:\rost\Ca2+_laser\raw_data',
         r'G:\rost\kozep\raw_data',

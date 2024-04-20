@@ -24,8 +24,12 @@ def solve_pde(ivp: SymmetricIVBCPBase) -> np.ndarray:
     t_range = ivp.frames * ivp.sec_per_frame
 
     sol = np.array(
-        SymmetricIVPSolver(ivp).solve(collection_interval=t_range / ivp.frames, t_range=t_range, report_progress=True,
-                                      dt=None)[:-1])
+        SymmetricIVPSolver(ivp).solve(
+            collection_interval=t_range / ivp.frames,
+            t_range=t_range,
+            report_progress=True,
+            dt=None)[:-1]
+    )
 
     return sol
 
@@ -215,6 +219,7 @@ def main():
 
 def create_tall_plot():
     darr_paths = []
+    # Please ensure that this iterates over the directories where the nd2 files are located
     for directory in [r'G:\rost\Ca2+_laser\raw_data', r'G:\rost\kozep\raw_data', r'G:\rost\sarok\raw_data']:
         for root, _, files in os.walk(directory):
             darr_paths.extend([os.path.join(root, file) for file in files if file.endswith('.nd2')])
@@ -222,7 +227,6 @@ def create_tall_plot():
 
     def create_params_from_row(row):
         params = Parameters()
-        # print(row)
         for col, value in row.items():
             if not pd.isnull(value):
                 params.add(col, value)
@@ -256,24 +260,18 @@ def create_tall_plot():
 
         linear_pde = LinearDiffusivityPDE()
         linear_pde.parameters = create_params_from_row(linear_df)
-        # linear_sol = solve_pde(VanillaSymmetricIVBCP(rtp, start_frame, linear_pde))
         linear_sol = solve_pde(DerivativeSymmetricIVBCP(rtp, start_frame, linear_pde))
 
         fisher_pde = LogisticDiffusionPDE()
         fisher_pde.parameters = create_params_from_row(fisher_df)
-        # fisher_sol = solve_pde(VanillaSymmetricIVBCP(rtp, start_frame, fisher_pde))
         fisher_sol = solve_pde(DerivativeSymmetricIVBCP(rtp, start_frame, fisher_pde))
 
         sigmoid_pde = SigmoidDiffusivityPDE()
         sigmoid_pde.parameters = create_params_from_row(sigmoid_df)
-        # sigmoid_sol = solve_pde(VanillaSymmetricIVBCP(rtp, start_frame, sigmoid_pde))
         sigmoid_sol = solve_pde(DerivativeSymmetricIVBCP(rtp, start_frame, sigmoid_pde))
 
         selected_frames = list(int(x ** 1.25) for x in range(15))
-        # selected_frames = list(range(10))
-        frame_of_max_intensity = np.argmax(np.max(rtp, axis=1))
         derivative_sols = [
-            # rtp.ndarray[[f + frame_of_max_intensity for f in selected_frames]],
             rtp.ndarray[[f + start_frame for f in selected_frames]],
             linear_sol[selected_frames],
             fisher_sol[selected_frames],
@@ -303,15 +301,12 @@ def create_tall_plot():
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, cax=ax_colorbar, orientation='horizontal', ticks=range(len(selected_frames)))
-        # cbar.ax.set_xticklabels([f'{f + frame_of_max_intensity}' for f in selected_frames])
         cbar.ax.set_xticklabels([f'{f + start_frame}' for f in selected_frames])
         cbar.set_label('Képkocka')
 
         plt.tight_layout()
-        # plt.title(filename)
         plt.show()
 
 
 if __name__ == '__main__':
     main()
-    # plot_single()

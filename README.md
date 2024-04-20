@@ -48,6 +48,7 @@ The project is organized into several directories, each serving a specific funct
     - `diffusion_model_plotter.py` - Plots results from the diffusion model simulations.
     - `misc_plotter.py` - Provides miscellaneous plotting functionalities.
     - `optimization_runner.py` - Script to run the optimization process for fitting PDEs to measured data.
+    - `fisher_phase_plot.nb` - A Mathematica file for creating the phase portrait of the Fisher-KPP equation.
 
 - **src/**
     - Source code for the project.
@@ -70,6 +71,8 @@ The project is organized into several directories, each serving a specific funct
         - `ivp_solver.py` - Solves initial value problems.
         - `optimizer.py` - Optimizes PDE parameters to fit experimental data.
     - `interactive_plots.ipynb` - Jupyter notebook for interactive visualization of the data and some processing steps.
+      Please keep in mind that since this notebook uses costume output widgets it might not work with specific cloud
+      services such as Google Colab
 
 # Script Functionality
 
