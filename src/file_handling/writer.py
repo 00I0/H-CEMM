@@ -81,13 +81,13 @@ class MP4Writer(Writer):
 
         def update(frame: int):
             plt.clf()
-
             plt.imshow(data[frame, ...], vmin=v_min, vmax=v_max)
             plt.title(f'Frame: {frame}')
+            plt.tight_layout()
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(dpi=300)
         ani = FuncAnimation(fig, update, frames=data.shape[0], repeat=False)
-        writer = FFMpegWriter(fps=10, metadata=dict(artist='Regaisz Oliver'), bitrate=10_000)
+        writer = FFMpegWriter(fps=3, metadata=dict(artist='Regaisz Oliver'), bitrate=10_000)
 
         ani.save(path, writer=writer)
 

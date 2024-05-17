@@ -24,23 +24,23 @@ To get started with the H-CEMM project, follow these steps to set up your enviro
 
 
 2. **Install Python Dependencies:**
-   The project requires Python 3.x and several dependencies which are listed in the `requirements.txt` file. Install
+   The project requires Python 3.12 and several dependencies which are listed in the `requirements.txt` file. Install
    these using pip:
 
    ```pip install -r requirements.txt```
 
 
 3. **Download the .nd2 files:**
-   Download the nd2 files for which you want to run the program than ensure that those parts of the files in scripts
+   Download the nd2 files for which you want to run the program then ensure that those parts of the files in scripts
    directory that are related to io are referencing actual files.
 
 # Folder Structure and File Descriptions
 
-The project is organized into several directories, each serving a specific function in the workflow:
+The project is organized into several directories:
 
 - **params/**
     - Contains optimized parameter values for the PDE models.
-    - `dirichlet_boundary_adaptive_dt_optimized.csv` - Contains optimized parameters using Dirichlet boundary conditions
+    - `adaptive_dt.csv` - Contains optimized parameters using Dirichlet boundary conditions
       and adaptive delta t.
 
 - **scripts/**
@@ -52,10 +52,10 @@ The project is organized into several directories, each serving a specific funct
 
 - **src/**
     - Source code for the project.
-    - `core/` - Includes main logic for diffusion analysis.
+    - `core/` - Includes the main logic for diffusion analysis.
         - `analyzer.py` - Finds the start frame and the start places of the process.
         - `diffusion_array.py` - Manages diffusion data arrays.
-        - `homogenizer.py` - Realizes the homogenization algorithm.
+        - `homogenizer.py` - Implementation of the homogenization algorithm.
         - `mask.py` - Could be used to select parts of the data.
         - `radial_time_profile.py` - Implementation of the Radial Time Profile matrix.
         - `step_widget.py` - Provides interactive widgets for step-by-step preprocessing control.
@@ -73,13 +73,16 @@ The project is organized into several directories, each serving a specific funct
     - `interactive_plots.ipynb` - Jupyter notebook for interactive visualization of the data and some processing steps.
       Please keep in mind that since this notebook uses costume output widgets it might not work with specific cloud
       services such as Google Colab
+    - `cell_segmentation.ipynb` - This notebook focuses on segmenting cell images and analyzing their properties. It
+      includes methods for preprocessing images, applying segmentation algorithms, and extracting quantitative
+      information about the cells. It also explores the implications of cell segmentation to the homogenizing algorithm.
 
 # Script Functionality
 
 - **diffusion_model_plotter.py:**
 
-  This script generates plots from the output of diffusion simulations. It uses parameters defined
-  in csv file with similar structure to `dirichlet_boundary_adaptive_dt_optimized.csv`.
+  This script generates plots from the output of an IVBCP fitting. It uses parameters defined
+  in csv file with similar structure to `adaptive_dt.csv`.
 
 
 - **misc_plotter.py:**
@@ -90,5 +93,6 @@ The project is organized into several directories, each serving a specific funct
 
 - **optimization_runner.py:**
 
-  Runs the parameter optimization algorithm to fit the diffusion models to the actual measured data.
+  Runs the parameter optimization algorithm to fit the IVBCP-s to the actual measured data. The script outputs the
+  optimized parameters
 

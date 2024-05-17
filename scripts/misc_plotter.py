@@ -1,5 +1,6 @@
 import functools
 import inspect
+import json
 import math
 from math import ceil, sqrt
 from typing import List, Sequence, Iterator, Iterable
@@ -173,16 +174,17 @@ def plot_starting_place_finder_comparisons(
         strategies (Sequence[str]): The name of the different algorithms, used as the 'strategy' parameter in
         Analyzer.detect_diffusion_start_place.
 
-        length (int | None): number of DiffusionArrays in the input, if diffusion_arrays is not an Iterator it will be
+        length (int | None): Number of DiffusionArrays in the input, if diffusion_arrays is not an Iterator it will be
         ignored.
 
-        legend (Iterable[str]):
+        legend (Iterable[str] | None): The legend to indicate which color means which startegy, if None no legend will
+        be shown.
     """
 
     if isinstance(diffusion_arrays, DiffusionArray):
         diffusion_arrays = [diffusion_arrays]
 
-    colors = ['orange', 'blue', 'green', 'red', 'purple', 'pink', 'brown', 'cyan', 'magenta', 'yellow', 'lime',
+    colors = ['orange', 'white', 'magenta', 'red', 'green', 'pink', 'brown', 'cyan', 'purple', 'yellow', 'lime',
               'black']
 
     if isinstance(diffusion_arrays, Iterator):
@@ -223,12 +225,13 @@ def plot_starting_place_finder_comparisons(
             ax.scatter(*point, color=color, alpha=.9)
 
     fig.subplots_adjust(wspace=0.01)
-    fig.legend(
-        [patches.Circle((0, 0), radius=0.2, facecolor=c) for c in colors[:len(strategies)]],
-        legend,
-        loc='lower right',
-        fontsize='large'
-    )
+    if legend:
+        fig.legend(
+            [patches.Circle((0, 0), radius=0.2, facecolor=c) for c in colors[:len(strategies)]],
+            legend,
+            loc='lower right',
+            fontsize='large'
+        )
     plt.tight_layout()
 
 
@@ -527,8 +530,17 @@ def test_resizing(file_name: str) -> None:
 
 
 # noinspection DuplicatedCode
-def main(diffusion_array_path):
-    darr_with_background = DiffusionArray(diffusion_array_path).channel(0)
+def main(alias: str):
+    alias_to_file = dict()
+    with open('../config.json', 'r') as json_file:
+        config_file = json.load(json_file)
+
+    for details in config_file.values():
+        alias = details['alias']
+        path = details['path']
+        alias_to_file[alias] = path
+
+    darr_with_background = DiffusionArray(alias_to_file[alias]).channel(0)
 
     pipeline = PipeLineWidget(None, display_mode=False)
     pipeline.add_step(ClippingWidget())
@@ -547,5 +559,6 @@ def main(diffusion_array_path):
 
 
 if __name__ == '__main__':
-    # Ensure that this is the real address of an nd2 file
-    main('G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl018.nd2')
+    # Ensure that you use a real alias
+
+    main('ATP-kozep-018')

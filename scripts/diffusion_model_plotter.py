@@ -1,12 +1,12 @@
+import json
 import os
 from dataclasses import dataclass
 from typing import List
 
-import matplotlib
 import numpy as np
 import pandas as pd
 from lmfit import Parameters
-from matplotlib import pyplot as plt, gridspec
+from matplotlib import pyplot as plt
 from pde.visualization.movies import Movie
 
 from core.diffusion_array import DiffusionArray
@@ -14,13 +14,22 @@ from core.homogenizer import Homogenizer
 from core.step_widget import PipeLineWidget, ClippingWidget, StartFrameWidget, StartPlaceWidget, \
     BackgroundRemovalWidget, \
     NormalizingWidget
-from ivbcps.diffusion_PDEs import LinearDiffusivityPDE, LogisticDiffusionPDE, SigmoidDiffusivityPDE
+from ivbcps.diffusion_PDEs import LinearDiffusivityPDE, LogisticDiffusionPDE, SigmoidDiffusivityPDE, MixedPDE
 from ivbcps.ivbcp import SymmetricIVBCPBase, VanillaSymmetricIVBCP, DerivativeSymmetricIVBCP, \
     NormalDistributionSymmetricIVBCP
 from ivbcps.ivp_solver import SymmetricIVPSolver
 
 
 def solve_pde(ivp: SymmetricIVBCPBase) -> np.ndarray:
+    """
+    Solves a PDE initial value boundary condition problem (IVBCP).
+
+    Args:
+        ivp (SymmetricIVBCPBase): The initial value boundary condition problem to solve.
+
+    Returns:
+        np.ndarray: The solution array.
+    """
     t_range = ivp.frames * ivp.sec_per_frame
 
     sol = np.array(
@@ -41,13 +50,28 @@ class PlotSpecifier:
     start_frame: int
 
 
-def create_line_plots(movie: str, plots: List[PlotSpecifier], save_individual_frames_instead: bool = False):
+def create_line_plots(
+        movie: str,
+        plots: List[PlotSpecifier],
+        save_individual_frames_instead: bool = False
+):
+    """
+    Creates line plots for the given data and saves them as a movie or individual frames.
+
+    Args:
+        movie (str): The filename for the movie or individual frames.
+        plots (List[PlotSpecifier]): The list of plots to create.
+        save_individual_frames_instead (bool): Whether to save individual frames instead of a movie. Defaults to False.
+    """
     plt.close("all")
 
+    colors = ['mediumblue', 'firebrick', 'magenta', 'red', 'green', 'pink', 'brown', 'cyan', 'purple', 'yellow', 'lime',
+              'black']
+
     if not save_individual_frames_instead:
-        movie = Movie(filename=movie, dpi=300)
+        movie = Movie(filename=movie, dpi=300, framerate=15)
         dpi = movie.dpi
-        fig_width, fig_height = 1280 / dpi, 720 / dpi
+        fig_width, fig_height = 1280 / 125, 720 / 125
         fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
 
     else:
@@ -65,23 +89,22 @@ def create_line_plots(movie: str, plots: List[PlotSpecifier], save_individual_fr
     max_distance = max(ps.rtp.shape[1] for ps in plots)
 
     print(list(ps.rtp.shape for ps in plots))
-    for t, frame in enumerate(range(max_number_of_frames)):
+    for t, frame in enumerate(sorted(list(range(6, max_number_of_frames)) * 5)):
         ax.clear()
         ax.set_ylim(y_min, y_max)
         ax.set_xlim(0, max_distance)
-        ax.set_title(f'T = {t:3d}')
-        ax.set_xlabel('Távolság az origótól (pixel)')
+        ax.set_xlabel('Távolság a sebzéstől (pixel)')
         ax.set_ylabel('Koncentráció')
 
-        for ps in plots:
+        for ps, color in zip(plots, colors):
             if frame < ps.start_frame or frame - ps.start_frame > ps.rtp.shape[0] - 1:
-                ax.plot(np.nan, label=ps.label)
+                ax.plot(np.nan, label=ps.label, color=color)
             else:
                 if ps.label == 'Sigmoid Diffusion':
                     ax.plot(ps.rtp[frame - ps.start_frame], linestyle='--', dashes=(6, 8), linewidth=1.5,
-                            label=ps.label)
+                            label=ps.label, color=color)
                 else:
-                    ax.plot(ps.rtp[frame - ps.start_frame], label=ps.label)
+                    ax.plot(ps.rtp[frame - ps.start_frame], label=ps.label, color=color)
 
         ax.set_title(f'Képkocka: {frame:3d}')
         plt.legend(loc='upper right')
@@ -90,6 +113,7 @@ def create_line_plots(movie: str, plots: List[PlotSpecifier], save_individual_fr
         if not save_individual_frames_instead:
             movie.add_figure(fig)
         else:
+            directory = os.path.dirname(movie)
             plt.savefig(os.path.join(directory, f'{t}.png'))
 
     if not save_individual_frames_instead:
@@ -97,13 +121,26 @@ def create_line_plots(movie: str, plots: List[PlotSpecifier], save_individual_fr
 
 
 def plot_runner(
-        darr_path,
-        pde_name,
-        vanilla_params,
-        der_bc_params,
-        norm_added_params,
-        save_individual_frames=False,
+        darr_path: str,
+        pde_name: str,
+        vanilla_params: List[tuple] | None,
+        der_bc_params: List[tuple] | None,
+        norm_added_params: List[tuple] | None,
+        save_individual_frames: bool = False,
+        output_dir: str = '../video'
 ):
+    """
+    Runs the plotting pipeline for the given parameters and saves the resulting plots.
+
+    Args:
+        darr_path (str): The path to the diffusion array file.
+        pde_name (str): The name of the PDE.
+        vanilla_params (List[tuple] | None): Parameters for the vanilla PDEs.
+        der_bc_params (List[tuple] | None): Parameters for the derivative boundary condition PDEs.
+        norm_added_params (List[tuple] | None): Parameters for the normal distribution added PDEs.
+        save_individual_frames (bool): Whether to save individual frames instead of a movie. Defaults to False.
+        output_dir (str): The directory to save the output files. Defaults to '../video'.
+    """
     if vanilla_params and not isinstance(vanilla_params, list):
         vanilla_params = [('Vanilla', vanilla_params, pde_name)]
     if der_bc_params and not isinstance(der_bc_params, list):
@@ -115,7 +152,7 @@ def plot_runner(
         'Logistic Diffusion': lambda: LogisticDiffusionPDE(),
         'Sigmoid Diffusion': lambda: SigmoidDiffusivityPDE(),
         'Linear Diffusion': lambda: LinearDiffusivityPDE(),
-        # 'Mixed Models': lambda: MixedPDE(),
+        'Mixed Models': lambda: MixedPDE(),
     }
 
     pipeline = PipeLineWidget(None, display_mode=False)
@@ -153,24 +190,34 @@ def plot_runner(
             norm_added_sol = solve_pde(NormalDistributionSymmetricIVBCP(rtp, start_frame, norm_added_pde))
             plots.append(PlotSpecifier(norm_added_sol, name, start_frame))
 
+    base_filename = os.path.splitext(os.path.basename(darr_path))[0]
     if save_individual_frames:
-        create_line_plots(
-            f'../video/plots/der_bc/{os.path.splitext(os.path.basename(darr_path))[0]}/{os.path.basename(darr_path)} {pde_name}.mp4',
-            plots
-        )
+        output_path = os.path.join(output_dir, base_filename, f'{base_filename} {pde_name}.mp4')
     else:
-        create_line_plots(
-            f'../video/{os.path.splitext(os.path.basename(darr_path))[0]} {pde_name}.mp4',
-            plots
-        )
+        output_path = os.path.join(output_dir, f'{base_filename}.mp4')
+
+    create_line_plots(output_path, plots)
 
 
-def main():
+def main(parameter_csv: str, output_dir: str = '../video'):
+    """
+    Main function to run the plot runner for multiple diffusion array files.
+
+    Args:
+        parameter_csv (str): The path to the CSV file containing parameter values.
+        output_dir (str): The directory to save the output files. Defaults to '../video'.
+    """
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    with open('../config.json', 'r') as json_file:
+        config_file = json.load(json_file)
+
     darr_paths = []
-    for directory in [r'G:\rost\Ca2+_laser\raw_data', r'G:\rost\kozep\raw_data', r'G:\rost\sarok\raw_data']:
-        for root, _, files in os.walk(directory):
-            darr_paths.extend([os.path.join(root, file) for file in files if file.endswith('.nd2')])
-    darr_paths = map(str, darr_paths)
+    for details in config_file.values():
+        path = details['path']
+        darr_paths.append(path)
 
     def create_params(row):
         params = Parameters()
@@ -180,15 +227,16 @@ def main():
 
         return params
 
-    df = pd.read_csv('../params/dirichlet_boundary_adaptive_dt_optimized.csv', sep=',')
+    df = pd.read_csv(parameter_csv, sep=',')
     filename_to_path = {filename.split('\\')[-1].strip(): filename for filename in darr_paths}
     df['Filename'] = df['Filename'].map(filename_to_path)
 
-    selected_columns = ['diffusivity', 'mu', 'alpha', 'beta', 'lambda_term', 'gamma']
+    selected_columns = ['diffusivity', 'mu', 'alpha', 'beta', 'lambda_term', 'gamma', 'D', 'phi']
     pdetype_to_name = {
         'LogisticDiffusionPDE': 'Logistic Diffusion',
         'LinearDiffusivityPDE': 'Linear Diffusion',
         'SigmoidDiffusivityPDE': 'Sigmoid Diffusion',
+        'MixedPDE': 'Mixed Models'
     }
     pde_types = df['Eqname'].unique()
     filenames = df['Filename'].unique()
@@ -196,117 +244,30 @@ def main():
 
     for filename in filenames:
         print('Currently plotting: ', filename)
-        der_bc_params = []
+        vanilla_params = []
         for pde_type in pde_types:
             filtered_df = df[(df['Filename'] == filename) & (df['Eqname'] == pde_type)]
 
-            # der_bc_df = filtered_df[filtered_df['Type'] == 'Derivative BC']
-            der_bc_df = filtered_df
+            vanilla_df = filtered_df[filtered_df['Type'] == 'vanilla']
 
-            der_bc_param = create_params(der_bc_df.iloc[0][selected_columns]) if not der_bc_df.empty else None
-            der_bc_params.append((pdetype_to_name[pde_type], der_bc_param, pdetype_to_name[pde_type]))
+            vanilla_param = create_params(vanilla_df.iloc[0][selected_columns]) if not vanilla_df.empty else None
+            vanilla_params.append((pdetype_to_name[pde_type], vanilla_param, pdetype_to_name[pde_type]))
 
         plot_runner(
             filename,
             '',
-            vanilla_params=None,
-            # vanilla_params=der_bc_params,
-            der_bc_params=der_bc_params,
-            # der_bc_params=None,
-            norm_added_params=None
+            vanilla_params=vanilla_params,
+            der_bc_params=None,
+            norm_added_params=None,
+            output_dir=output_dir
         )
 
 
-def create_tall_plot():
-    darr_paths = []
-    # Please ensure that this iterates over the directories where the nd2 files are located
-    for directory in [r'G:\rost\Ca2+_laser\raw_data', r'G:\rost\kozep\raw_data', r'G:\rost\sarok\raw_data']:
-        for root, _, files in os.walk(directory):
-            darr_paths.extend([os.path.join(root, file) for file in files if file.endswith('.nd2')])
-    darr_paths = map(str, darr_paths)
-
-    def create_params_from_row(row):
-        params = Parameters()
-        for col, value in row.items():
-            if not pd.isnull(value):
-                params.add(col, value)
-
-        return params
-
-    df = pd.read_csv('../params/dirichlet_boundary_adaptive_dt_optimized.csv', sep=',')
-    filename_to_path = {filename.split('\\')[-1].strip(): filename for filename in darr_paths}
-    df['Filename'] = df['Filename'].map(filename_to_path)
-
-    filenames = df['Filename'].unique()
-    selected_columns = ['diffusivity', 'mu', 'alpha', 'beta', 'gamma', 'lambda_term']
-
-    for filename in filenames:
-        print(filename)
-        darr = DiffusionArray(filename).channel(0).frame('0:50')
-        pipeline = PipeLineWidget(None, display_mode=False)
-        pipeline.add_step(ClippingWidget())
-        pipeline.add_step(StartFrameWidget())
-        pipeline.add_step(StartPlaceWidget())
-        pipeline.add_step(BackgroundRemovalWidget())
-        pipeline.add_step(NormalizingWidget())
-        darr, start_frame, start_place = pipeline.apply_pipeline(darr)
-        # noinspection PyTypeChecker
-        rtp = Homogenizer.Builder().start_frame(start_frame).center_point(start_place).build().homogenize(darr)
-
-        filtered_df = df[(df['Filename'] == filename)]
-        linear_df = filtered_df[filtered_df['Eqname'] == 'LinearDiffusivityPDE'].iloc[0][selected_columns]
-        fisher_df = filtered_df[filtered_df['Eqname'] == 'LogisticDiffusionPDE'].iloc[0][selected_columns]
-        sigmoid_df = filtered_df[filtered_df['Eqname'] == 'SigmoidDiffusivityPDE'].iloc[0][selected_columns]
-
-        linear_pde = LinearDiffusivityPDE()
-        linear_pde.parameters = create_params_from_row(linear_df)
-        linear_sol = solve_pde(DerivativeSymmetricIVBCP(rtp, start_frame, linear_pde))
-
-        fisher_pde = LogisticDiffusionPDE()
-        fisher_pde.parameters = create_params_from_row(fisher_df)
-        fisher_sol = solve_pde(DerivativeSymmetricIVBCP(rtp, start_frame, fisher_pde))
-
-        sigmoid_pde = SigmoidDiffusivityPDE()
-        sigmoid_pde.parameters = create_params_from_row(sigmoid_df)
-        sigmoid_sol = solve_pde(DerivativeSymmetricIVBCP(rtp, start_frame, sigmoid_pde))
-
-        selected_frames = list(int(x ** 1.25) for x in range(15))
-        derivative_sols = [
-            rtp.ndarray[[f + start_frame for f in selected_frames]],
-            linear_sol[selected_frames],
-            fisher_sol[selected_frames],
-            sigmoid_sol[selected_frames]
-        ]
-        v_min = np.min(derivative_sols[0])
-        v_max = np.max(derivative_sols[0])
-        titles = ['Mért adatok', 'Lineáris diffúzió', 'Fisher-KPP egyenlet', 'Nem lineáris diffúzió']
-        plt.figure(figsize=(7, 12), dpi=300)
-        gs = gridspec.GridSpec(5, 1, height_ratios=[1, 1, 1, 1, 0.075])
-        cmap = matplotlib.colormaps['plasma']
-
-        for i, (spec, derivative_sol) in enumerate(zip(gs, derivative_sols)):
-            ax = plt.subplot(spec)
-            ax.set_title(titles[i])
-            ax.set_ylim([v_min, v_max])
-            for j, state in enumerate(derivative_sol):
-                color = cmap(j / (len(derivative_sol) - 1))
-                ax.plot(state, color=color)
-
-            ax.xaxis.set_visible(i > len(derivative_sols) - 2)
-            ax.set_xlabel('Távolság az origótól')
-            ax.set_ylabel('Koncentráció')
-
-        ax_colorbar = plt.subplot(gs[-1])
-        norm = matplotlib.colors.Normalize(vmin=0, vmax=len(selected_frames) - 1)
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        cbar = plt.colorbar(sm, cax=ax_colorbar, orientation='horizontal', ticks=range(len(selected_frames)))
-        cbar.ax.set_xticklabels([f'{f + start_frame}' for f in selected_frames])
-        cbar.set_label('Képkocka')
-
-        plt.tight_layout()
-        plt.show()
-
-
 if __name__ == '__main__':
-    main()
+    # This script creates a video for each initial value problem, based on the optimized parameters contained
+    # in `../params/adaptive_delta_t.csv`, and puts them into the `../video` directory
+
+    #           -----     ----    ---   ---   --  --  Warning  --  --  ---   ---    ----     -----
+    # Since this script also solves the initial value problems, the runtime could be long.
+
+    main('../params/adaptive_delta_t.csv', '../video/adaptive_delta_t')

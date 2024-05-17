@@ -1,0 +1,52 @@
+{
+  "1472_4_laser@30sec001.nd2": {
+    "path": "G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec001.nd2",
+    "category": "sarok",
+    "alias": "ATP-sarok-001"
+  },
+  "1472_4_laser@30sec002.nd2": {
+    "path": "G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec002.nd2",
+    "category": "sarok",
+    "alias": "ATP-sarok-002"
+  },
+  "1472_4_laser@30sec003.nd2": {
+    "path": "G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec003.nd2",
+    "category": "sarok",
+    "alias": "ATP-sarok-003"
+  },
+  "1472_4_laser@30sec004.nd2": {
+    "path": "G:\\rost\\sarok\\raw_data\\1472_4_laser@30sec004.nd2",
+    "category": "sarok",
+    "alias": "ATP-sarok-004"
+  },
+  "1133_3_laser@30sec006.nd2": {
+    "path": "G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec006.nd2",
+    "category": "Ca2+",
+    "alias": "Ca2-sarok-006"
+  },
+  "1133_3_laser@30sec007.nd2": {
+    "path": "G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec007.nd2",
+    "category": "Ca2+",
+    "alias": "Ca2-sarok-007"
+  },
+  "1133_3_laser@30sec008.nd2": {
+    "path": "G:\\rost\\Ca2+_laser\\raw_data\\1133_3_laser@30sec008.nd2",
+    "category": "Ca2+",
+    "alias": "Ca2-sarok-008"
+  },
+  "super_1472_5_laser_EC1flow_laserabl010.nd2": {
+    "path": "G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl010.nd2",
+    "category": "kozep",
+    "alias": "ATP-kozep-010"
+  },
+  "super_1472_5_laser_EC1flow_laserabl017.nd2": {
+    "path": "G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl017.nd2",
+    "category": "kozep",
+    "alias": "ATP-kozep-017"
+  },
+  "super_1472_5_laser_EC1flow_laserabl018.nd2": {
+    "path": "G:\\rost\\kozep\\raw_data\\super_1472_5_laser_EC1flow_laserabl018.nd2",
+    "category": "kozep",
+    "alias": "ATP-kozep-018"
+  }
+}
